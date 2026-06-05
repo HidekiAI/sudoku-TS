@@ -86,6 +86,8 @@ const MoveSchema = Schema.TaggedUnion("_tag")({
 
 Across the entire codebase — no mutation, no class setters, no `void` returns.
 
+> **Note:** effect-ts provides immutable data structures (`HashMap`, `Option`, `Chunk`, etc.) and APIs that encourage immutability (e.g. `Ref.update` takes a pure `A => A`), but it does not *enforce* it — you *could* use `let` and mutate arrays in place. sudoku-TS deliberately opts into strict immutability as a project convention: every interface field is `readonly`, every state transition returns a new object, and every board operation is a pure function. This is a architectural choice, not something effect-ts imposes.
+
 **Client state** (`packages/client/src/state.ts`) — every field is `readonly`, every update returns a new object:
 
 ```typescript
