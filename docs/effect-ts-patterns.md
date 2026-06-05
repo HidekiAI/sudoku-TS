@@ -194,6 +194,8 @@ const req = yield * Schema.decodeUnknown(CreateGameRequestSchema)(raw);
 
 ## Layer / Tag DI (`packages/server/src/services/`)
 
+The functional equivalent of constructor injection — services declare their requirements via `Tag`, implementations get wired together at the program edge. Instead of passing dependencies through constructors or globals, every dependency is resolved from context at runtime.
+
 ```typescript
 // 1. Define service interface
 export interface GameStore { ... }
@@ -209,6 +211,8 @@ Layer.provide(GameStoreLive),
 ```
 
 ## Ref / HashMap (`packages/server/src/services/game-store.ts`)
+
+Mutable state in FP is managed through controlled references, not raw variables. `SynchronizedRef` provides atomic concurrent access, and `HashMap` is an immutable persistent map — each `set` returns a new map instead of mutating in place.
 
 ```typescript
 // Concurrent-safe mutable state
@@ -229,6 +233,8 @@ yield *
 
 ## Effect.gen (`all packages`)
 
+The primary way to write effectful code that looks like normal imperative code — `Effect.gen` is to `Effect` what `async` is to `Promise`. Inside the generator, `yield*` unwraps each `Effect<T>` into `T`, and a `return` wraps the value back into an `Effect`.
+
 ```typescript
 // Imperative-style composition inside Effect
 const createGame: GameService["createGame"] = (raw) =>
@@ -245,6 +251,8 @@ const createGame: GameService["createGame"] = (raw) =>
 
 ## Effect.iterate (`packages/client/src/main.ts`)
 
+A pure functional loop — instead of `while(true)` with mutable state, `Effect.iterate` threads state through each iteration as an immutable value. The loop terminates when the state hits a terminal phase (`"quit"` or `"completed"`).
+
 ```typescript
 // Pure functional game loop
 Effect.iterate(initialState, (state) =>
@@ -258,6 +266,8 @@ Effect.iterate(initialState, (state) =>
 
 ## Option (`packages/shared/src/engine/solver.ts`)
 
+The standard FP way to model a value that may or may not exist — avoids `null` and `undefined` by making absence explicit in the type. The solver returns `Option<Board>` to distinguish "solved" from "unsolvable" without sentinel values.
+
 ```typescript
 // Solver returns Option.Option<Board>
 export function solve(board: Board): Option.Option<Board> {
@@ -267,6 +277,8 @@ export function solve(board: Board): Option.Option<Board> {
 ```
 
 ## Effect.catchTag / Effect.catchAll (`packages/server/src/routes/`)
+
+Structured error handling — instead of `try/catch` with its untyped `Error` objects, effect-ts lets you catch specific error types by tag. `Effect.catchTag("ParseError")` catches only `Schema` parse errors, while `Effect.catchAll` is the final fallback.
 
 ```typescript
 // Structured error handling
@@ -285,6 +297,8 @@ yield *
 
 ## Clock (`packages/server/src/services/game-service.ts`)
 
+Accessing time as an `Effect` rather than a direct `Date.now()` call makes it testable — you can provide a fake clock in tests to get deterministic timestamps without waiting for real time to pass.
+
 ```typescript
 const now = yield * Clock.currentTimeMillis;
 const elapsedSeconds = Math.floor((now - session.startTime) / 1000);
@@ -292,11 +306,15 @@ const elapsedSeconds = Math.floor((now - session.startTime) / 1000);
 
 ## Random (`packages/shared/src/engine/generator.ts`)
 
+Randomness as an `Effect` makes it pure and testable — the generator produces a description of randomness rather than impure `Math.random()` calls. A test runtime can provide a seeded random for reproducible results.
+
 ```typescript
 const idx = yield * Random.nextIntBetween(0, chars.length);
 ```
 
 ## HttpClient (`packages/client/src/api/`)
+
+HTTP requests as `Effect` values — instead of raw `fetch` calls that start immediately and must be wrapped in try/catch, the client returns an `Effect` that can be retried, timed out, or mocked in tests before execution.
 
 ```typescript
 const client = HttpClient.fetch();
@@ -310,6 +328,8 @@ const data = yield * response.json;
 ```
 
 ## Terminal I/O (`packages/client/src/ui/`)
+
+Wrapping raw Node.js `process.stdin` in `Effect.async` turns a callback-based API into a first-class `Effect` — composable with the rest of the program, testable via dependency injection, and automatically handled by effect-ts's runtime.
 
 ```typescript
 // Read keypress via raw stdin
