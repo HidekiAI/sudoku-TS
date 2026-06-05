@@ -4,6 +4,8 @@ Full-stack Sudoku game built with TypeScript and [effect-ts](https://effect.webs
 
 ## FP Features Demonstrated
 
+> The core benefit of FP is that bugs surface at **compile time** rather than at runtime. Every pattern below catches a class of errors that would otherwise slip into production.
+
 ### Schema (effect/Schema)
 `packages/shared/src/schemas/`
 - Runtime validation + type inference from a single declaration

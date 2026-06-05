@@ -67,6 +67,23 @@ effect-ts exploits this: because `Effect.gen` uses `function*`, the runtime is a
 
 `yield*` is **protocol-based**, not hardcoded to one type — the same syntax works on anything implementing `[Symbol.iterator]()`. This is why effect-ts chose it over `await`: you can swap the runtime (sync, async, test, retry, etc.) without changing your code.
 
+## Compile-Time Guarantees
+
+The overarching goal of FP in this project: **make bugs impossible at the type level**. Every pattern below catches a specific class of runtime errors at compile time:
+
+| What used to be a runtime error | Now caught at compile time by | Where |
+|---|---|---|
+| `null is not an object` / `undefined is not a function` | `Option<T>` — absence is explicit in the type | `solver.ts:38` |
+| `data.map is not a function` (wrong shape) | `Schema.decodeUnknown` — typed at the boundary | `game-service.ts:36` |
+| "Cannot read property of undefined" (missing dependency) | `Tag` + `Layer` — unprovided service fails to compile | `main.ts` composition |
+| "X is not a function" (wrong error handler) | `Effect.catchTag("ParseError")` — typed error tags | `game-routes.ts` |
+| "Unhandled promise rejection" | `Effect` has no implicit unhandled state — errors must be handled or passed up | all routes |
+| Mutating shared state by accident | `readonly` fields + pure functions returning new objects | `state.ts`, `board.ts` |
+| Missing a case in a switch | Tagged union (`KeyEvent`) — exhaustive matching | `input.ts` |
+| Wrong environment variable type | `Config.number("PORT").pipe(Config.withDefault(8000))` | `main.ts:32` |
+| Randomness making tests flaky | `Random.nextIntBetween` as `Effect` — seedable in tests | `generator.ts` |
+| Race condition on shared state | `SynchronizedRef` — atomic reads and writes | `game-store.ts` |
+
 ## Schema — Single-Declaration Validation + Type Inference (`packages/shared/src/schemas/`)
 
 The core pattern: declare once, get runtime validation + TypeScript types from the same source.
