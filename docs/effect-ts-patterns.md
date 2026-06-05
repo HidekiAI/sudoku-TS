@@ -2,6 +2,42 @@
 
 > Every effect-ts feature demonstrated in this project, indexed by file.
 
+## How `yield*` Works (the key to effect-ts)
+
+`yield*` is a JavaScript language feature that **delegates iteration** to a sub-iterator and forwards values in both directions. The engine desugars it internally to a `while` loop over plain `yield`:
+
+```javascript
+// What you write:
+const x = yield* inner
+
+// What the engine effectively does:
+const iter = inner[Symbol.iterator]()
+let result = iter.next(undefined)
+while (!result.done) {
+  const sentBack = yield result.value   // ← forward the yielded value up
+  result = iter.next(sentBack)          // ← forward the reply back in
+}
+const x = result.value                  // ← yield* evaluates to this
+```
+
+effect-ts uses this as a **request-response channel**:
+1. `yield* effect` — the effect object is iterable: its first `.next()` yields itself (the descriptor)
+2. That `yield` sends the descriptor up to effect-ts's runtime (the caller of `.next()`)
+3. The runtime interprets the descriptor (runs the computation, resolves dependencies, etc.)
+4. The runtime calls `generator.next(interpretedValue)` — the interpreted value flows through `yield*` back into the inner iterator's `.next(sentBack)`
+5. The inner iterator returns `{ done: true, value: sentBack }`
+6. `yield*` evaluates to the interpreted value
+
+Compare to other languages:
+
+| Language | Equivalent | What it unwraps | How it works |
+|----------|-----------|-----------------|--------------|
+| JS `await` | `const x = await promise` | `Promise<A>` → `A` | language built-in, hardcoded to Promise |
+| F# `let!` | `let! x = expr` | any monadic type `M<A>` → `A` | computation expression builder desugaring |
+| JS `yield*` | `const x = yield* effect` | any iterable → return value | generator protocol delegation |
+
+`yield*` is **protocol-based**, not hardcoded to one type — the same syntax works on anything implementing `[Symbol.iterator]()`. This is why effect-ts chose it over `await`: you can swap the runtime (sync, async, test, retry, etc.) without changing your code.
+
 ## Schema (`packages/shared/src/schemas/`)
 
 ```typescript
