@@ -183,20 +183,28 @@ export function moveCursor(state: ClientState, dRow: number, dCol: number): Clie
 **Board operations** (`packages/shared/src/engine/board.ts`) — pure functions, no side effects:
 
 ```typescript
-// Immutable set: deep clone → mutate copy → return clone
+// Immutable set: map over rows, replace only the target cell
 export function setCell(
   board: Board,
   row: number,
   col: number,
   value: CellValue,
 ): Board {
-  const copy = copyBoard(board); // board.map(row => [...row])
-  copy[row]![col] = value;
-  return copy; // original board unchanged
+  return board.map((r, ri) =>
+    ri === row
+      ? r.map((c, ci) => (ci === col ? value : c))
+      : ([...r] as Board[number]),
+  ) as Board;
 }
+```
 
-export function copyBoard(board: Board): Board {
-  return board.map((row) => [...row]) as Board;
+**Completion detection** — `isBoardSolved` replaces the old `isBoardFull` (which only checked for zeros). The puzzle is only completed when every cell matches the pregenerated solution exactly:
+
+```typescript
+export function isBoardSolved(board: Board, solution: Board): boolean {
+  return board.every((row, r) =>
+    row.every((cell, c) => cell === solution[r]?.[c]),
+  );
 }
 ```
 
@@ -237,26 +245,30 @@ Layer.provide(GameServiceLive),
 Layer.provide(GameStoreLive),
 ```
 
-## Ref / HashMap (`packages/server/src/services/game-store.ts`)
+## SynchronizedRef / HashMap (`packages/server/src/services/game-store.ts`)
 
 Mutable state in FP is managed through controlled references, not raw variables. `SynchronizedRef` provides atomic concurrent access, and `HashMap` is an immutable persistent map — each `set` returns a new map instead of mutating in place.
 
 ```typescript
+import { SynchronizedRef, HashMap } from "effect";
+
 // Concurrent-safe mutable state
-const store =
-  yield * Ref.SynchronizedRef.make(HashMap.empty<string, GameSession>());
+const store = yield* SynchronizedRef.make(
+  HashMap.empty<string, GameSession>(),
+);
 
 // Read
-const map = yield * store.get;
+const map = yield* SynchronizedRef.get(store);
 const session = HashMap.get(map, id);
 
-// Update (atomic)
-yield *
-  store.update((map) => {
-    const updated = { ...session, ...patch };
-    return HashMap.set(map, id, updated);
-  });
+// Update (atomic) with immutable map
+yield* SynchronizedRef.update(store, (map) => {
+  const updated: GameSession = { ...current, ...patch };
+  return HashMap.set(map, id, updated);
+});
 ```
+
+The `store.update` callback receives the current map, returns a new map — `SynchronizedRef` ensures atomicity so concurrent requests don't lose writes.
 
 ## Effect.gen (`all packages`)
 
@@ -276,20 +288,30 @@ const createGame: GameService["createGame"] = (raw) =>
   });
 ```
 
-## Effect.iterate (`packages/client/src/main.ts`)
+## Recursive Game Loop (`packages/client/src/main.ts`)
 
-A pure functional loop — instead of `while(true)` with mutable state, `Effect.iterate` threads state through each iteration as an immutable value. The loop terminates when the state hits a terminal phase (`"quit"` or `"completed"`).
+The game loop is a pure recursive function — each call threads an immutable `ClientState` through, calls `render` to print the board, reads a keypress, and recurses. No `while(true)`, no mutable state.
+
+The `readKey` effect is created once at startup by `makeReadKey()` and passed as an explicit parameter — the loop never needs to know how keypresses are sourced.
 
 ```typescript
-// Pure functional game loop
-Effect.iterate(initialState, (state) =>
-  Effect.gen(function* (_) {
+function gameLoop(
+  state: ClientState,
+  readKey: Effect.Effect<KeyEvent>,
+): Effect.Effect<ClientState, never, GameApi> {
+  if (state.phase === "quit")
+    return Effect.succeed(state);
+
+  return Effect.gen(function* (_) {
     yield* render(state);
-    const key = yield* readKey();
-    return updateState(state, key);
-  }),
-);
+    const key = yield* readKey;
+    const newState = yield* handleKey(state, key);
+    return yield* gameLoop(newState, readKey);  // tail recursion
+  });
+}
 ```
+
+Terminal states (`"quit"`, `"completed"`) short-circuit via `handleKey` returning `initialState` or `quit(state)`. The recursion naturally terminates because the next iteration of `gameLoop` hits the base case.
 
 ## Option (`packages/shared/src/engine/solver.ts`)
 
@@ -298,8 +320,7 @@ The standard FP way to model a value that may or may not exist — avoids `null`
 ```typescript
 // Solver returns Option.Option<Board>
 export function solve(board: Board): Option.Option<Board> {
-  const result = solveInternal(copyBoard(board));
-  return result; // Some(board) | None
+  return solveInternal(board.map((row) => [...row]) as Board);
 }
 ```
 
@@ -354,16 +375,45 @@ const response =
 const data = yield * response.json;
 ```
 
-## Terminal I/O (`packages/client/src/ui/`)
+## Queue + Raw Stdin (`packages/client/src/ui/input.ts`)
 
-Wrapping raw Node.js `process.stdin` in `Effect.async` turns a callback-based API into a first-class `Effect` — composable with the rest of the program, testable via dependency injection, and automatically handled by effect-ts's runtime.
+The terminal input handler is built on `Queue.unbounded<KeyEvent>` — raw `stdin` data events write parsed key events into the queue, and a `readKey` effect dequeues one event at a time. This eliminates all module-level mutable state (no `rawActive`, `pending`, `buffer`, `queued`, or `resolveRead` globals).
+
+`makeReadKey()` returns a one-shot setup `Effect` containing the `readKey` consumer and a `restoreStdin` finalizer — the caller wires them at the program entry point:
 
 ```typescript
-// Read keypress via raw stdin
-const readKey: Effect.Effect<KeyEvent> = Effect.async<KeyEvent>((resume) => {
-  process.stdin.setRawMode(true);
-  process.stdin.once("data", (data) => {
-    resume(Effect.succeed(parseKey(data)));
+export function makeReadKey(): Effect.Effect<{
+  readonly readKey: Effect.Effect<KeyEvent>;
+  readonly restoreStdin: Effect.Effect<void>;
+}> {
+  return Effect.gen(function* (_) {
+    const queue = yield* Queue.unbounded<KeyEvent>();
+
+    function onData(chunk: Buffer) {
+      const combined = Buffer.concat([inputPending, chunk]);
+      const { events, pending } = drainBuffer(combined);
+      inputPending = pending;
+      for (const event of events) {
+        Queue.unsafeOffer(queue, event);
+      }
+    }
+
+    process.stdin.on("data", onData);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    const readKey: Effect.Effect<KeyEvent> =
+      Queue.take(queue);
+
+    const restoreStdin: Effect.Effect<void> = Effect.sync(() => {
+      process.stdin.removeListener("data", onData);
+      process.stdin.pause();
+      process.stdin.setRawMode(false);
+    });
+
+    return { readKey, restoreStdin };
   });
-});
+}
 ```
+
+The queue acts as a **buffer between the push-based `onData` callback and the pull-based game loop** — the callback writes events as they arrive, and the game loop reads them one by one via `Queue.take`, which naturally suspends when the queue is empty.

@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Array, Effect } from "effect";
 import chalk from "chalk";
 import type { Board } from "@sudoku-ts/shared";
 import type { ClientState } from "../state.js";
@@ -37,19 +37,14 @@ function renderCell(
   isConflict: boolean,
 ): string {
   const display = value === 0 ? "." : String(value);
-  let styled: string;
-  if (isConflict) {
-    styled = chalk.red.bold(display);
-  } else if (isGiven) {
-    styled = chalk.cyan.bold(display);
-  } else if (value !== 0) {
-    styled = chalk.green(display);
-  } else {
-    styled = chalk.dim(display);
-  }
-  if (isCursor) {
-    styled = chalk.bgYellow.black(styled);
-  }
+  const base = isConflict
+    ? chalk.red.bold(display)
+    : isGiven
+      ? chalk.cyan.bold(display)
+      : value !== 0
+        ? chalk.green(display)
+        : chalk.dim(display);
+  const styled = isCursor ? chalk.bgYellow.black(base) : base;
   return ` ${styled} `;
 }
 
@@ -92,39 +87,31 @@ function renderMessage(state: ClientState): string {
 }
 
 function renderBoardGrid(state: ClientState): string[] {
-  const lines: string[] = [];
   const topThick = blockDiv(TTL, TC, TTC, TTR, HH, TTC);
-  const topThin = blockDiv(TL, TC, TTC, TR, H, TTC);
   const midThick = blockDiv(LLC, C, CC, RRC, HH, CC);
   const botThick = blockDiv(BBL, BC, BBC, BBR, HH, BBC);
-  const botThin = blockDiv(BL, BC, BBC, BR, H, BBC);
   const cellThin = blockDiv(LC, C, CC, RC, H, CC);
 
-  lines.push("");
-  lines.push(topThick);
-  for (let r = 0; r < 9; r++) {
-    const rowParts: string[] = [];
-    for (let g = 0; g < 3; g++) {
-      const cells: string[] = [];
-      for (let c = g * 3; c < g * 3 + 3; c++) {
-        const value = state.board[r]?.[c] ?? 0;
-        const isGiven = state.givenMask[r]?.[c] ?? false;
-        const isCursor = state.cursor.row === r && state.cursor.col === c;
-        const isConflict = state.conflicts[r]?.[c] ?? false;
-        cells.push(renderCell(value, isGiven, isCursor, isConflict));
-      }
-      rowParts.push(cells.join(V));
-    }
-    lines.push(`  ${VV}${rowParts.join(VV)}${VV}`);
-    if (r === 2 || r === 5) {
-      lines.push(midThick);
-    } else if (r < 8) {
-      lines.push(cellThin);
-    }
-  }
-  lines.push(botThick);
-  lines.push("");
-  return lines;
+  const gridLines = Array.flatMap(
+    Array.makeBy(9, (r) => r),
+    (r) => {
+      const rowLine = `  ${VV}${Array.makeBy(3, (g) =>
+        Array.makeBy(3, (c) => {
+          const col = g * 3 + c;
+          const value = state.board[r]?.[col] ?? 0;
+          const isGiven = state.givenMask[r]?.[col] ?? false;
+          const isCursor = state.cursor.row === r && state.cursor.col === col;
+          const isConflict = state.conflicts[r]?.[col] ?? false;
+          return renderCell(value, isGiven, isCursor, isConflict);
+        }).join(V),
+      ).join(VV)}${VV}`;
+      if (r === 2 || r === 5) return [rowLine, midThick];
+      if (r < 8) return [rowLine, cellThin];
+      return [rowLine];
+    },
+  );
+
+  return ["", topThick, ...gridLines, botThick, ""];
 }
 
 export function renderConnectingString(): string {

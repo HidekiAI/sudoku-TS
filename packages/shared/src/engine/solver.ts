@@ -31,14 +31,19 @@ export function isValidBoardFast(board: Board): boolean {
 }
 
 export function findEmpty(board: Board): Option.Option<[number, number]> {
-  return Option.fromNullable(
-    board
-      .flatMap((row, r) =>
-        row.map((cell, c) =>
-          cell === 0 ? ([r, c] as [number, number]) : null,
+  return Array.head(
+    Array.filterMap(
+      Array.flatMap(
+        Array.makeBy(9, (r) =>
+          Array.makeBy(9, (c) => [r, c] as [number, number]),
         ),
-      )
-      .find((x) => x !== null) ?? undefined,
+        (pair) => pair,
+      ),
+      ([r, c]) =>
+        board[r]?.[c] === 0
+          ? Option.some([r, c] as [number, number])
+          : Option.none(),
+    ),
   );
 }
 
@@ -48,20 +53,24 @@ export function isSafe(
   col: number,
   num: CellValue,
 ): boolean {
-  for (let c = 0; c < 9; c++) {
-    if (board[row]?.[c] === num) return false;
-  }
-  for (let r = 0; r < 9; r++) {
-    if (board[r]?.[col] === num) return false;
-  }
+  const rowSafe = Array.every(
+    Array.makeBy(9, (c) => board[row]?.[c]),
+    (v) => v !== num,
+  );
+  const colSafe = Array.every(
+    Array.makeBy(9, (r) => board[r]?.[col]),
+    (v) => v !== num,
+  );
   const boxRow = Math.floor(row / 3) * 3;
   const boxCol = Math.floor(col / 3) * 3;
-  for (let r = boxRow; r < boxRow + 3; r++) {
-    for (let c = boxCol; c < boxCol + 3; c++) {
-      if (board[r]?.[c] === num) return false;
-    }
-  }
-  return true;
+  const boxSafe = Array.every(
+    Array.flatMap(
+      Array.makeBy(3, (r) => boxRow + r),
+      (r) => Array.makeBy(3, (c) => board[r]?.[boxCol + c] ?? 0),
+    ),
+    (v) => v !== num,
+  );
+  return rowSafe && colSafe && boxSafe;
 }
 
 function setCellPure(
@@ -77,18 +86,18 @@ function setCellPure(
 
 function solveInternal(board: Board): Option.Option<Board> {
   const empty = findEmpty(board);
-  if (Option.isNone(empty)) {
-    return Option.some(board);
-  }
+  if (Option.isNone(empty)) return Option.some(board);
   const [row, col] = empty.value;
-  for (let num = 1; num <= 9; num++) {
+  const tryNum = (num: number): Option.Option<Board> => {
+    if (num > 9) return Option.none();
     if (isSafe(board, row, col, num as CellValue)) {
       const next = setCellPure(board, row, col, num as CellValue);
       const result = solveInternal(next);
       if (Option.isSome(result)) return result;
     }
-  }
-  return Option.none();
+    return tryNum(num + 1);
+  };
+  return tryNum(1);
 }
 
 export function solve(board: Board): Option.Option<Board> {

@@ -1,4 +1,4 @@
-import { Effect, Queue } from "effect";
+import { Effect, Option, Queue } from "effect";
 
 const debug = () => process.env["SUDOKU_DEBUG"] !== undefined;
 function dbg(...args: unknown[]) {
@@ -25,18 +25,18 @@ const ESC = 0x1b;
 const CSI = 0x5b;
 const SS3 = 0x4f;
 
-function parseEscape(byte: number): KeyEvent | null {
+function parseEscape(byte: number): Option.Option<KeyEvent> {
   switch (byte) {
     case 0x41:
-      return { kind: "up" };
+      return Option.some({ kind: "up" });
     case 0x42:
-      return { kind: "down" };
+      return Option.some({ kind: "down" });
     case 0x43:
-      return { kind: "right" };
+      return Option.some({ kind: "right" });
     case 0x44:
-      return { kind: "left" };
+      return Option.some({ kind: "left" });
     default:
-      return null;
+      return Option.none();
   }
 }
 
@@ -55,8 +55,8 @@ function drainBuffer(buf: Buffer): {
       (buf[cursor + 1] === CSI || buf[cursor + 1] === SS3)
     ) {
       const kind = parseEscape(buf[cursor + 2]!);
-      if (kind !== null) {
-        events.push(kind);
+      if (Option.isSome(kind)) {
+        events.push(kind.value);
         cursor += 3;
         continue;
       }

@@ -1,5 +1,6 @@
 import {
   Array,
+  Clock,
   Context,
   Effect,
   HashMap,
@@ -60,7 +61,7 @@ export const makeGameStore = Effect.gen(function* (_) {
   ) =>
     Effect.gen(function* (_) {
       const id = yield* generateId;
-      const now = Date.now();
+      const now = yield* Clock.currentTimeMillis;
       const session: GameSession = {
         id,
         difficulty,

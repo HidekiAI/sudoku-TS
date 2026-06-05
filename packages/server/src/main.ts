@@ -1,4 +1,4 @@
-import { Effect, Console, Config } from "effect";
+import { Effect, Console, Config, Option } from "effect";
 import { HttpMiddleware, HttpServerRequest } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { createServer } from "node:http";
@@ -6,12 +6,17 @@ import { router } from "./routes/game-routes.js";
 import { GameStore, makeGameStore } from "./services/game-store.js";
 import { GameService, makeGameService } from "./services/game-service.js";
 
-const parseArg = (key: string, args: string[]): string | null => {
+const parseArg = (key: string, args: string[]): Option.Option<string> => {
   const idx = args.indexOf(`--${key}`);
-  if (idx !== -1 && idx + 1 < args.length) return args[idx + 1]!;
+  if (idx !== -1 && idx + 1 < args.length) return Option.some(args[idx + 1]!);
   const eq = args.find((a) => a.startsWith(`--${key}=`));
-  return eq ? eq.slice(`--${key}=`.length) : null;
+  return eq ? Option.some(eq.slice(`--${key}=`.length)) : Option.none();
 };
+
+const cliPort = parseArg("port", process.argv);
+const cliHost = parseArg("host", process.argv);
+if (Option.isSome(cliPort)) process.env["PORT"] = cliPort.value;
+if (Option.isSome(cliHost)) process.env["HOST"] = cliHost.value;
 
 const corsWithLogging = HttpMiddleware.make((app) =>
   Effect.gen(function* (_) {
@@ -22,11 +27,6 @@ const corsWithLogging = HttpMiddleware.make((app) =>
     return resp;
   }),
 );
-
-const cliPort = parseArg("port", process.argv);
-const cliHost = parseArg("host", process.argv);
-if (cliPort !== null) process.env["PORT"] = cliPort;
-if (cliHost !== null) process.env["HOST"] = cliHost;
 
 const program = Effect.gen(function* (_) {
   const port = yield* Config.number("PORT").pipe(Config.withDefault(8000));

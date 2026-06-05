@@ -7,11 +7,15 @@ const NUMBERS: CellValue[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 function fillDiagonalBoxes(): Effect.Effect<Board> {
   return Effect.gen(function* (_) {
-    let board: Board = Array.makeBy(9, () =>
+    const board: Board = Array.makeBy(9, () =>
       Array.makeBy(9, () => 0 as CellValue),
     );
-    for (let box = 0; box < 3; box++) {
-      const nums = [...(yield* Random.shuffle(NUMBERS))];
+    const shuffled = yield* Effect.all(
+      Array.makeBy(3, () =>
+        Random.shuffle(NUMBERS).pipe(Effect.map((n) => [...n])),
+      ),
+    );
+    return shuffled.reduce((b, nums, box) => {
       const cells = Array.flatMap(
         Array.makeBy(3, (ri) =>
           Array.makeBy(
@@ -21,9 +25,8 @@ function fillDiagonalBoxes(): Effect.Effect<Board> {
         ),
         (pair) => pair,
       );
-      board = cells.reduce((b, [r, c], i) => setCell(b, r, c, nums[i]!), board);
-    }
-    return board;
+      return cells.reduce((acc, [r, c], i) => setCell(acc, r, c, nums[i]!), b);
+    }, board);
   });
 }
 

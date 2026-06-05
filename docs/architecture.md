@@ -16,6 +16,7 @@ sudoku-ts/
 │   ├── decisions.md                     # ADR-style decision log
 │   ├── api-contract.md                  # API endpoints + Schema shapes
 │   ├── game-engine.md                   # Solver + generator details
+│   ├── puzzle-generation.md             # Full generation pipeline design
 │   └── effect-ts-patterns.md           # Patterns catalog
 ├── packages/
 │   ├── shared/                          # Zero-dependency pure lib
@@ -65,10 +66,11 @@ sudoku-ts/
 │          │     200 { valid, solved, ..} │          │
 │          │                              │          │
 │    effect-ts powers:                    │   effect-ts powers:
-│    • Terminal I/O                       │   • Schema validation
+│    • Queue (raw stdin → events)        │   • Schema validation
 │    • HttpClient                         │   • Layer DI (Tag + Layer)
-│    • Effect.iterate game loop           │   • Ref.SynchronizedRef<HashMap>
+│    • Recursive game loop (Effect.gen)  │   • SynchronizedRef<HashMap>
 │    • Option/Either for errors           │   • Effect.gen business logic
+│    • makeReadKey (one-shot setup)       │   • Clock for elapsed time
 └──────────┘                              └──────────┘
 ```
 
@@ -90,16 +92,19 @@ sudoku-ts/
 
 ## Client Loop
 
+The game loop is a recursive function — `readKey` is created once by `makeReadKey()` and passed as an explicit parameter through every iteration:
+
 ```
-Effect.iterate(initialState, state =>
-  Effect.gen(function*(_) {
-    yield* render(state)                  // print board + status
-    const key = yield* readKey()          // raw keypress
-    const newState = updateState(state, key)
-    return newState
-  })
-)
-// Runs until state.status === "quit" | "completed"
+makeReadKey()
+  → { readKey, restoreStdin }
+    → gameLoop(initialState, readKey)
+
+gameLoop(state, readKey):
+  if state.phase == "quit" → return state                // base case
+  render(state)                                          // pure string → console.log
+  key = yield* readKey                                   // Queue.take(keyEvents)
+  newState = handleKey(state, key)                       // pure transition
+  gameLoop(newState, readKey)                            // tail recurse
 ```
 
 ## Key effect-ts Features by Module
@@ -107,11 +112,15 @@ Effect.iterate(initialState, state =>
 | Package | Feature | Usage |
 |---------|---------|-------|
 | shared | Schema | All DTOs — decode requests, encode responses, infer types |
+| shared | Array | Pure loops — map, flatMap, makeBy, every, reduce replace for/push |
+| shared | Option | Solver return values, no null — findEmpty, solve return Option |
+| shared | Random | Seedable puzzle generation — shuffle, nextIntBetween |
 | server | Tag + Layer | GameStore, GameService as services |
-| server | Ref.SynchronizedRef | Concurrent game session HashMap |
+| server | SynchronizedRef | Concurrent game session HashMap |
 | server | Schema.decodeUnknown | Parse + validate request bodies |
 | server | Effect.catchTag | Structured error handling |
-| client | Effect.iterate | Main game loop |
+| server | Clock | Elapsed time tracking |
+| client | Queue | Raw stdin → parsed key events, push-to-pull bridge |
+| client | Recursive gameLoop | Pure functional loop with explicit readKey parameter |
 | client | HttpClient | Server communication |
-| client | Terminal | stdin/stdout as Effect |
-| client | Option | Key parsing results |
+| client | Effect.sync | Console I/O wrapped as Effect |
