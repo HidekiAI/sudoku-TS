@@ -36,6 +36,34 @@ Compare to other languages:
 | F# `let!` | `let! x = expr` | any monadic type `M<A>` → `A` | computation expression builder desugaring |
 | JS `yield*` | `const x = yield* effect` | any iterable → return value | generator protocol delegation |
 
+### Why `function*` over `async function`?
+
+Both let you write sequential-looking code over non-immediate values, but they differ in **who drives**:
+
+| | `async function` | `function*` |
+|---|---|---|
+| Returns | `Promise<A>` | `Generator<A>` |
+| Pauses on | `await` | `yield` / `yield*` |
+| Resumes when | promise resolves | caller calls `.next(val)` |
+| Control direction | **push** — promise pushes result when ready | **pull** — caller pulls values via `.next()` |
+| Eagerness | `async fn()` starts a promise **immediately** | `function*()` returns a lazy descriptor — nothing runs until `.next()` |
+
+```javascript
+async function push() {
+  const x = await fetch("/data")  // microtask queue drives this
+  return x.json()
+}
+
+function* pull() {
+  const x = yield fetch("/data")  // caller decides when via .next()
+  return x.json()
+}
+```
+
+This makes `function*` **lazy-friendly** — the runtime sees every yielded Effect descriptor before deciding what to do. With `async/await`, control is handed to the Promise microtask queue at the first `await`, and you can no longer intercept, retry, or mock individual steps.
+
+effect-ts exploits this: because `Effect.gen` uses `function*`, the runtime is a plain loop calling `.next()` — it can run effects synchronously, asynchronously, in tests with mocked dependencies, with retry logic, with logging, or over the wire, all without changing the generator code.
+
 `yield*` is **protocol-based**, not hardcoded to one type — the same syntax works on anything implementing `[Symbol.iterator]()`. This is why effect-ts chose it over `await`: you can swap the runtime (sync, async, test, retry, etc.) without changing your code.
 
 ## Schema — Single-Declaration Validation + Type Inference (`packages/shared/src/schemas/`)
