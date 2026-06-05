@@ -60,7 +60,7 @@ function* pull() {
 }
 ```
 
-This makes `function*` **lazy-friendly** — the runtime sees every yielded Effect descriptor before deciding what to do. With `async/await`, control is handed to the Promise microtask queue at the first `await`, and you can no longer intercept, retry, or mock individual steps.
+This makes generators **pull-based/deferred** — the runtime sees every yielded Effect descriptor before deciding what to do. With `async/await`, control is handed to the Promise microtask queue at the first `await`, and you can no longer intercept, retry, or mock individual steps.
 
 effect-ts exploits this: because `Effect.gen` uses `function*`, the runtime is a plain loop calling `.next()` — it can run effects synchronously, asynchronously, in tests with mocked dependencies, with retry logic, with logging, or over the wire, all without changing the generator code.
 
