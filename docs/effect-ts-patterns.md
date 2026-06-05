@@ -86,7 +86,31 @@ const MoveSchema = Schema.TaggedUnion("_tag")({
 
 Across the entire codebase — no mutation, no class setters, no `void` returns.
 
-> **Note:** effect-ts provides immutable data structures (`HashMap`, `Option`, `Chunk`, etc.) and APIs that encourage immutability (e.g. `Ref.update` takes a pure `A => A`), but it does not *enforce* it — you *could* use `let` and mutate arrays in place. sudoku-TS deliberately opts into strict immutability as a project convention: every interface field is `readonly`, every state transition returns a new object, and every board operation is a pure function. This is a architectural choice, not something effect-ts imposes.
+> **Note:** effect-ts **rewards** immutability — its APIs (`pipe`, `Ref.update`, `HashMap`, Schema decode returning fresh objects) all compose naturally with pure data flow — but it does not *enforce* it. You can absolutely abuse it:
+>
+> ```typescript
+> // This compiles and runs — no guard rails
+> const bad = Effect.gen(function*() {
+>   const arr = [1, 2, 3]
+>   arr.sort()          // mutable in-place
+>   arr.push(4)         // also fine
+>   let counter = 0     // mutable state
+>   counter++
+>   return arr
+> })
+> ```
+>
+> It's a carrot, not a stick. sudoku-TS deliberately opts into strict immutability as a **project convention**: every interface field is `readonly`, every state transition returns a new object, every board operation is a pure function. This is an architectural choice, not something effect-ts imposes.
+>
+> ### On the "iceberg effect"
+>
+> FP with effect-ts also helps keep code **traceable** — no hidden execution paths or deep inheritance chains:
+>
+> - `pipe(a, b, c)` — every transformation is visible and linear
+> - `Effect.gen` blocks — straight-line code, no virtual dispatch
+> - `Tag` + `Layer` — every dependency is declared at the composition boundary (`main.ts`), not buried in constructors
+>
+> Compare to OOP where a method call might traverse 4 levels of inheritance before landing on the actual implementation. effect-ts's explicitness means what you see is what runs — less iceberg.
 
 **Client state** (`packages/client/src/state.ts`) — every field is `readonly`, every update returns a new object:
 
