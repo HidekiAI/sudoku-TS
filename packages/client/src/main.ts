@@ -2,7 +2,7 @@ import { Effect, Console, Layer } from "effect";
 import { FetchHttpClient } from "@effect/platform";
 import { GameApi, GameApiLive } from "./api/game-api.js";
 import { render } from "./ui/render.js";
-import { readKey, restoreStdin, type KeyEvent } from "./ui/input.js";
+import { makeReadKey, type KeyEvent } from "./ui/input.js";
 import {
   initialState,
   setGame,
@@ -29,11 +29,11 @@ function handleKey(
     if (key.kind === "enter") {
       return Effect.gen(function* (_) {
         const api = yield* GameApi;
-        const result = yield* Effect.catchAll(
-          api.createGame(state.difficulty),
-          () => Effect.succeed(null as unknown as never),
+        const result = yield* api.createGame(state.difficulty).pipe(
+          Effect.catchAll(() => Effect.succeed(null as unknown as never)),
+          Effect.map((r) => (r && "board" in r ? r : null)),
         );
-        if (result && "board" in result) {
+        if (result) {
           return setGame(
             state,
             result.id,
@@ -72,21 +72,23 @@ function handleKey(
           return showMessage(state, "Cannot change a given cell");
         }
         const value = key.kind === "erase" ? 0 : key.value;
-        const result = yield* Effect.catchAll(
-          api.submitMove(state.gameId, row, col, value),
-          () =>
-            Effect.succeed({
-              valid: false,
-              message: "Server error",
-              solved: false,
-              board: state.board,
-            }),
-        );
+        const result = yield* api
+          .submitMove(state.gameId, row, col, value)
+          .pipe(
+            Effect.catchAll(() =>
+              Effect.succeed({
+                valid: false,
+                message: "Server error",
+                solved: false,
+                board: state.board,
+              }),
+            ),
+          );
         const conflict =
           !result.valid && value !== 0
-            ? { row, col, isConflict: true }
+            ? { row, col, isConflict: true as const }
             : result.valid
-              ? { row, col, isConflict: false }
+              ? { row, col, isConflict: false as const }
               : undefined;
         return updateBoard(
           state,
@@ -102,16 +104,18 @@ function handleKey(
       return Effect.gen(function* (_) {
         const api = yield* GameApi;
         const { row, col } = state.cursor;
-        const result = yield* Effect.catchAll(
-          api.getHint(state.gameId, row, col),
-          () => Effect.succeed({} as never),
+        const result = yield* api.getHint(state.gameId, row, col).pipe(
+          Effect.catchAll(() => Effect.succeed({} as never)),
+          Effect.map((r) => (r && "board" in r ? r : null)),
         );
-        if (result && "board" in result) {
-          return updateBoard(state, result.board, result.message, false, {
-            row,
-            col,
-            isConflict: false,
-          });
+        if (result) {
+          return updateBoard(
+            state,
+            result.board,
+            result.message,
+            result.solved,
+            { row, col, isConflict: false },
+          );
         }
         return showMessage(state, "Hint failed. Is the server running?");
       });
@@ -131,59 +135,71 @@ function handleKey(
 
 function tryConnect(
   state: ClientState,
+  readKey: Effect.Effect<KeyEvent>,
 ): Effect.Effect<ClientState, never, GameApi> {
   return Effect.gen(function* (_) {
-    const api = yield* GameApi;
-    const result = yield* Effect.catchAll(
-      api.createGame(state.difficulty),
-      () => Effect.succeed(null as unknown as never),
+    yield* render(state);
+    const nextState = yield* Effect.race(
+      readKey.pipe(
+        Effect.map((key) => (key.kind === "quit" ? initialState : state)),
+      ),
+      Effect.sleep(2000).pipe(
+        Effect.flatMap(() =>
+          Effect.gen(function* (_2) {
+            const api = yield* GameApi;
+            const result = yield* api.createGame(state.difficulty).pipe(
+              Effect.catchAll(() => Effect.succeed(null as unknown as never)),
+              Effect.map((r) => (r && "board" in r ? r : null)),
+            );
+            return result
+              ? setGame(
+                  state,
+                  result.id,
+                  result.difficulty,
+                  result.board,
+                  result.givenMask,
+                )
+              : state;
+          }),
+        ),
+      ),
     );
-    if (result && "board" in result) {
-      return setGame(
-        state,
-        result.id,
-        result.difficulty,
-        result.board,
-        result.givenMask,
-      );
-    }
-    return state;
+    return nextState;
   });
 }
 
 function gameLoop(
   state: ClientState,
+  readKey: Effect.Effect<KeyEvent>,
 ): Effect.Effect<ClientState, never, GameApi> {
   if (state.phase === "quit")
     return Effect.succeed(state) as Effect.Effect<ClientState, never, GameApi>;
 
   if (state.phase === "connecting") {
     return Effect.gen(function* (_) {
-      yield* render(state);
-      const nextState = yield* Effect.race(
-        readKey().pipe(
-          Effect.map((key) => (key.kind === "quit" ? initialState : state)),
-        ),
-        Effect.sleep(2000).pipe(Effect.flatMap(() => tryConnect(state))),
-      );
-      return yield* gameLoop(nextState);
+      const nextState = yield* tryConnect(state, readKey);
+      return yield* gameLoop(nextState, readKey);
     });
   }
 
   return Effect.gen(function* (_) {
     yield* render(state);
-    const key = yield* readKey();
+    const key = yield* readKey;
     const newState = yield* handleKey(state, key);
-    return yield* gameLoop(newState);
+    return yield* gameLoop(newState, readKey);
   });
 }
 
 const ClientLive = Layer.provide(GameApiLive, FetchHttpClient.layer);
 
 Effect.runPromise(
-  gameLoop(initialState).pipe(
-    Effect.provide(ClientLive),
-    Effect.ensuring(restoreStdin()),
-    Effect.catchAll((e) => Console.error(`Fatal error: ${e}`)),
+  makeReadKey().pipe(
+    Effect.flatMap(({ readKey, restoreStdin }) =>
+      gameLoop(initialState, readKey).pipe(
+        Effect.provide(ClientLive),
+        Effect.ensuring(restoreStdin),
+        Effect.catchAll((e) => Console.error(`Fatal error: ${e}`)),
+      ),
+    ),
   ),
 );

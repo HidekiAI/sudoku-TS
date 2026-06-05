@@ -49,6 +49,7 @@ export const HintResponseSchema = Schema.Struct({
     Schema.between(0, 8),
   ) as Schema.Schema<CellValue, CellValue>,
   board: BoardSchema,
+  solved: Schema.Boolean,
   message: Schema.String,
 });
 export type HintResponse = Schema.Schema.Type<typeof HintResponseSchema>;

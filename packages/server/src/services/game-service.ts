@@ -12,7 +12,7 @@ import {
   buildGivenMask,
   copyBoard,
   setCell,
-  isBoardFull,
+  isBoardSolved,
 } from "@sudoku-ts/shared";
 import { GameStore } from "./game-store.js";
 
@@ -105,13 +105,13 @@ export const makeGameService = Effect.gen(function* (_) {
         } as ValidateMoveResponse;
       }
       const boardAfter = setCell(session.board, row, col, value as CellValue);
-      const full = isBoardFull(boardAfter);
+      const solved = isBoardSolved(boardAfter, session.solution);
       yield* store.update(id, {
         board: boardAfter,
         movesCount: session.movesCount + 1,
-        status: full ? "completed" : "active",
+        status: solved ? "completed" : "active",
       });
-      if (full) {
+      if (solved) {
         return {
           valid: true,
           message: "Puzzle solved!",
@@ -134,16 +134,21 @@ export const makeGameService = Effect.gen(function* (_) {
       const { row, col } = req;
       const correctValue = session.solution[row]![col]!;
       const boardAfter = setCell(session.board, row, col, correctValue);
+      const solved = isBoardSolved(boardAfter, session.solution);
       yield* store.update(id, {
         board: boardAfter,
         hintsUsed: session.hintsUsed + 1,
+        ...(solved ? { status: "completed" as const } : {}),
       });
       return {
         row,
         col,
         value: correctValue,
         board: boardAfter,
-        message: `Hint: (${row + 1}, ${col + 1}) = ${correctValue}`,
+        solved,
+        message: solved
+          ? "Puzzle solved!"
+          : `Hint: (${row + 1}, ${col + 1}) = ${correctValue}`,
       } as HintResponse;
     });
 

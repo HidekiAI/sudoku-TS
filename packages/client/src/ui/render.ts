@@ -41,7 +41,7 @@ function renderCell(
   if (isConflict) {
     styled = chalk.red.bold(display);
   } else if (isGiven) {
-    styled = chalk.cyan(display);
+    styled = chalk.cyan.bold(display);
   } else if (value !== 0) {
     styled = chalk.green(display);
   } else {
@@ -127,40 +127,40 @@ function renderBoardGrid(state: ClientState): string[] {
   return lines;
 }
 
-function renderConnecting(): void {
-  console.clear();
-  console.log(chalk.bold("  SUDOKU"));
-  console.log(chalk.dim("  ───────"));
-  console.log("");
-  console.log(
+export function renderConnectingString(): string {
+  return [
+    `${chalk.bold("  SUDOKU")}`,
+    `${chalk.dim("  ───────")}`,
+    "",
     `  ${chalk.yellow("⟳")}  ${chalk.white("Waiting for server...")}`,
-  );
-  console.log("");
-  console.log(`  ${chalk.dim("Server:")}  ${chalk.cyan(serverUrl())}`);
-  console.log("");
-  console.log(`  ${chalk.dim("Status:")}  ${chalk.yellow("connecting")}`);
-  console.log("");
-  console.log(chalk.dim("  Make sure the server is running and try again."));
-  console.log("");
-  console.log(
+    "",
+    `  ${chalk.dim("Server:")}  ${chalk.cyan(serverUrl())}`,
+    "",
+    `  ${chalk.dim("Status:")}  ${chalk.yellow("connecting")}`,
+    "",
+    `${chalk.dim("  Make sure the server is running and try again.")}`,
+    "",
     `  ${chalk.dim("Press")} ${chalk.white("q")} ${chalk.dim("to return to menu")}`,
-  );
+  ].join("\n");
+}
+
+function renderGameBoard(state: ClientState): string {
+  return [
+    `${chalk.bold("  SUDOKU")}`,
+    `${chalk.dim("  ───────")}`,
+    ...renderBoardGrid(state),
+    renderStatusLine(state),
+    renderMessage(state),
+  ].join("\n");
 }
 
 export function render(state: ClientState): Effect.Effect<void> {
   return Effect.sync(() => {
-    if (state.phase === "connecting") {
-      renderConnecting();
-      return;
-    }
     console.clear();
-    console.log(chalk.bold("  SUDOKU"));
-    console.log(chalk.dim("  ───────"));
-    const grid = renderBoardGrid(state);
-    for (const line of grid) {
-      console.log(line);
+    if (state.phase === "connecting") {
+      console.log(renderConnectingString());
+    } else {
+      console.log(renderGameBoard(state));
     }
-    console.log(renderStatusLine(state));
-    console.log(renderMessage(state));
   });
 }

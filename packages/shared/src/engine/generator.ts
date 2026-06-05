@@ -1,89 +1,46 @@
-import { Effect, Random, Array } from "effect";
+import { Array, Effect, Option, Random } from "effect";
 import type { Board, CellValue, Difficulty } from "../schemas/game.js";
-import { copyBoard, difficultyToRemoveCount } from "./board.js";
-import { solve, hasUniqueSolution } from "./solver.js";
+import { difficultyToRemoveCount, setCell } from "./board.js";
+import { findEmpty, isSafe, hasUniqueSolution } from "./solver.js";
 
 const NUMBERS: CellValue[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-function shuffleArray<T>(arr: T[]): Effect.Effect<T[]> {
-  return Effect.gen(function* (_) {
-    const shuffled = [...arr];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = yield* Random.nextIntBetween(0, i + 1);
-      [shuffled[i], shuffled[j]] = [shuffled[j]!, shuffled[i]!];
-    }
-    return shuffled;
-  });
-}
-
 function fillDiagonalBoxes(): Effect.Effect<Board> {
   return Effect.gen(function* (_) {
-    const board: Board = Array.makeBy(9, () =>
+    let board: Board = Array.makeBy(9, () =>
       Array.makeBy(9, () => 0 as CellValue),
     );
     for (let box = 0; box < 3; box++) {
-      const nums = yield* shuffleArray([...NUMBERS]);
-      let idx = 0;
-      for (let r = box * 3; r < box * 3 + 3; r++) {
-        for (let c = box * 3; c < box * 3 + 3; c++) {
-          const rowData = board[r];
-          if (rowData) rowData[c] = nums[idx]!;
-          idx++;
-        }
-      }
+      const nums = [...(yield* Random.shuffle(NUMBERS))];
+      const cells = Array.flatMap(
+        Array.makeBy(3, (ri) =>
+          Array.makeBy(
+            3,
+            (ci) => [box * 3 + ri, box * 3 + ci] as [number, number],
+          ),
+        ),
+        (pair) => pair,
+      );
+      board = cells.reduce((b, [r, c], i) => setCell(b, r, c, nums[i]!), board);
     }
     return board;
   });
 }
 
-function fillRemainingCells(board: Board): Effect.Effect<Board> {
+function fillRemainingCells(board: Board): Effect.Effect<Option.Option<Board>> {
   return Effect.gen(function* (_) {
-    const result = copyBoard(board);
-
-    function findNextEmpty(): [number, number] | null {
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          if ((result[r]?.[c] ?? 0) === 0) return [r, c];
-        }
+    const empty = findEmpty(board);
+    if (Option.isNone(empty)) return Option.some(board) as Option.Option<Board>;
+    const [row, col] = empty.value;
+    const numbers = [...(yield* Random.shuffle(NUMBERS))];
+    for (const num of numbers) {
+      if (isSafe(board, row, col, num as CellValue)) {
+        const next = setCell(board, row, col, num as CellValue);
+        const result = yield* fillRemainingCells(next);
+        if (Option.isSome(result)) return result;
       }
-      return null;
     }
-
-    function isValidPlacement(row: number, col: number, num: number): boolean {
-      for (let c = 0; c < 9; c++) {
-        if (result[row]?.[c] === num) return false;
-      }
-      for (let r = 0; r < 9; r++) {
-        if (result[r]?.[col] === num) return false;
-      }
-      const boxRow = Math.floor(row / 3) * 3;
-      const boxCol = Math.floor(col / 3) * 3;
-      for (let r = boxRow; r < boxRow + 3; r++) {
-        for (let c = boxCol; c < boxCol + 3; c++) {
-          if (result[r]?.[c] === num) return false;
-        }
-      }
-      return true;
-    }
-
-    function fill(): boolean {
-      const empty = findNextEmpty();
-      if (!empty) return true;
-      const [row, col] = empty;
-      const shuffled = [...NUMBERS].sort(() => Math.random() - 0.5);
-      for (const num of shuffled) {
-        if (isValidPlacement(row, col, num)) {
-          const rowData = result[row];
-          if (rowData) rowData[col] = num;
-          if (fill()) return true;
-          if (rowData) rowData[col] = 0;
-        }
-      }
-      return false;
-    }
-
-    fill();
-    return result;
+    return Option.none() as Option.Option<Board>;
   });
 }
 
@@ -92,23 +49,22 @@ export function generate(
 ): Effect.Effect<{ puzzle: Board; solution: Board }> {
   return Effect.gen(function* (_) {
     const partial = yield* fillDiagonalBoxes();
-    const solution = yield* fillRemainingCells(partial);
+    const solutionOpt = yield* fillRemainingCells(partial);
+    const solution = Option.getOrThrow(solutionOpt);
     const toRemove = difficultyToRemoveCount(difficulty);
-    const puzzle = copyBoard(solution);
-    const allCells: [number, number][] = [];
-    for (let r = 0; r < 9; r++) {
-      for (let c = 0; c < 9; c++) {
-        allCells.push([r, c]);
-      }
-    }
-    const shuffled = yield* shuffleArray(allCells);
-    let removed = 0;
-    for (const [r, c] of shuffled) {
-      if (removed >= toRemove) break;
-      const rowData = puzzle[r];
-      if (rowData) rowData[c] = 0;
-      removed++;
-    }
+    const allCells = Array.flatMap(
+      Array.makeBy(9, (r) =>
+        Array.makeBy(9, (c) => [r, c] as [number, number]),
+      ),
+      (pair) => pair,
+    );
+    const shuffled = yield* Random.shuffle(allCells);
+    const puzzle = Array.reduce(
+      shuffled,
+      solution as Board,
+      (board, [r, c], i) =>
+        i < toRemove ? setCell(board, r, c, 0 as CellValue) : board,
+    );
     return { puzzle, solution };
   });
 }

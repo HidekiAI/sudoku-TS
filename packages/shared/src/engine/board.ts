@@ -1,36 +1,25 @@
 import { Array } from "effect";
-import type { Board, Coord, CellValue, Difficulty } from "../schemas/game.js";
-
-const BOX_RANGES: ReadonlyArray<readonly [number, number]> = [
-  [0, 3],
-  [3, 6],
-  [6, 9],
-];
+import type { Board, CellValue, Difficulty } from "../schemas/game.js";
 
 export function getRow(board: Board, row: number): Board[number] {
   return board[row] ?? [];
 }
 
 export function getCol(board: Board, col: number): CellValue[] {
-  const result: CellValue[] = [];
-  for (let r = 0; r < 9; r++) {
-    const row = board[r];
-    if (row) result.push(row[col] ?? 0);
-  }
-  return result;
+  return Array.map(board, (row) => row[col] ?? 0);
 }
 
 export function getBox(board: Board, row: number, col: number): CellValue[] {
   const boxRow = Math.floor(row / 3) * 3;
   const boxCol = Math.floor(col / 3) * 3;
-  const result: CellValue[] = [];
-  for (let r = boxRow; r < boxRow + 3; r++) {
-    for (let c = boxCol; c < boxCol + 3; c++) {
-      const rowData = board[r];
-      if (rowData) result.push(rowData[c] ?? 0);
-    }
-  }
-  return result;
+  return Array.flatMap(
+    Array.makeBy(3, (i) => boxRow + i),
+    (r) => Array.makeBy(3, (j) => board[r]?.[boxCol + j] ?? 0),
+  );
+}
+
+function appearsOnce(values: CellValue[], value: CellValue): boolean {
+  return values.filter((v) => v === value).length <= 1;
 }
 
 export function isValidPlacement(
@@ -40,64 +29,42 @@ export function isValidPlacement(
   value: CellValue,
 ): boolean {
   if (value === 0) return true;
-  const rowVals = getRow(board, row);
-  if (
-    rowVals.filter((v) => v === value).length >=
-    (rowVals[row] === value ? 2 : 1)
-  ) {
-    return false;
-  }
-  const colVals = getCol(board, col);
-  if (
-    colVals.filter((v) => v === value).length >=
-    (board[row]?.[col] === value ? 2 : 1)
-  ) {
-    return false;
-  }
+  const cellValue = board[row]?.[col] ?? 0;
+  const rowVals = getRow(board, row).map((v, c) => (c === col ? 0 : v));
+  const colVals = getCol(board, col).map((v, r) => (r === row ? 0 : v));
   const boxVals = getBox(board, row, col);
-  if (
-    boxVals.filter((v) => v === value).length >=
-    (board[row]?.[col] === value ? 2 : 1)
-  ) {
-    return false;
-  }
-  return true;
+  return (
+    appearsOnce(rowVals, value) &&
+    appearsOnce(colVals, value) &&
+    appearsOnce(boxVals, value)
+  );
 }
 
 export function isBoardValid(board: Board): boolean {
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      const val = board[r]?.[c] ?? 0;
-      if (val !== 0) {
-        const copy = board.map((row) => [...row]) as Board;
-        const copyRow = copy[r];
-        if (copyRow) copyRow[c] = 0;
-        if (!isValidPlacement(copy, r, c, val as CellValue)) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
+  return board.every((row, r) =>
+    row.every(
+      (val, c) => val === 0 || isValidPlacement(board, r, c, val as CellValue),
+    ),
+  );
 }
 
 export function isBoardFull(board: Board): boolean {
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      if ((board[r]?.[c] ?? 0) === 0) return false;
-    }
-  }
-  return true;
+  return board.every((row) => row.every((cell) => cell !== 0));
+}
+
+export function isBoardSolved(board: Board, solution: Board): boolean {
+  return board.every((row, r) =>
+    row.every((cell, c) => cell === solution[r]?.[c]),
+  );
 }
 
 export function countEmptyCells(board: Board): number {
-  let count = 0;
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      if ((board[r]?.[c] ?? 0) === 0) count++;
-    }
-  }
-  return count;
+  return Array.reduce(
+    board,
+    0,
+    (acc, row) =>
+      acc + Array.reduce(row, 0, (acc2, cell) => acc2 + (cell === 0 ? 1 : 0)),
+  );
 }
 
 export function copyBoard(board: Board): Board {
@@ -110,10 +77,11 @@ export function setCell(
   col: number,
   value: CellValue,
 ): Board {
-  const copy = copyBoard(board);
-  const rowData = copy[row];
-  if (rowData) rowData[col] = value;
-  return copy;
+  return board.map((r, ri) =>
+    ri === row
+      ? r.map((c, ci) => (ci === col ? value : c))
+      : ([...r] as Board[number]),
+  ) as Board;
 }
 
 export function difficultyToRemoveCount(difficulty: Difficulty): number {
@@ -130,19 +98,15 @@ export function difficultyToRemoveCount(difficulty: Difficulty): number {
 }
 
 export function findConflicts(board: Board): Array<[number, number]> {
-  const conflicts: Array<[number, number]> = [];
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      const val = board[r]?.[c] ?? 0;
-      if (val !== 0) {
-        const copy = copyBoard(board);
-        const rowData = copy[r];
-        if (rowData) rowData[c] = 0;
-        if (!isValidPlacement(copy as Board, r, c, val as CellValue)) {
-          conflicts.push([r, c]);
-        }
-      }
-    }
-  }
-  return conflicts;
+  return Array.flatMap(board, (row, r) =>
+    Array.flatMap(row, (val, c) => {
+      if (val === 0) return [];
+      const cleared = board.map((r2, ri) =>
+        ri === r ? r2.map((c2, ci) => (ci === c ? 0 : c2)) : r2,
+      ) as Board;
+      return isValidPlacement(cleared, r, c, val as CellValue)
+        ? []
+        : [[r, c] as [number, number]];
+    }),
+  );
 }

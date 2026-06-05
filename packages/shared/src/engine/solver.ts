@@ -1,19 +1,48 @@
-import { Option } from "effect";
+import { Array, Option } from "effect";
 import type { Board, CellValue } from "../schemas/game.js";
-import { copyBoard } from "./board.js";
 
-function findEmpty(board: Board): Option.Option<[number, number]> {
-  for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      if ((board[r]?.[c] ?? 0) === 0) {
-        return Option.some([r, c]);
-      }
-    }
-  }
-  return Option.none();
+function hasNoConflicts(values: CellValue[]): boolean {
+  const filtered = values.filter((v) => v !== 0);
+  return new Set(filtered).size === filtered.length;
 }
 
-function isSafe(
+export function isValidBoardFast(board: Board): boolean {
+  const rowsOk = Array.every(board, (row) => hasNoConflicts(row));
+  const colsOk = Array.every(
+    Array.makeBy(9, (c) => Array.map(board, (row) => row[c] ?? 0)),
+    hasNoConflicts,
+  );
+  const boxesOk = Array.every(
+    Array.flatMap(
+      Array.makeBy(3, (br) =>
+        Array.makeBy(3, (bc) => [br, bc] as [number, number]),
+      ),
+      (pair) => pair,
+    ),
+    ([br, bc]) =>
+      hasNoConflicts(
+        Array.flatMap(
+          Array.makeBy(3, (r) => br * 3 + r),
+          (r) => Array.makeBy(3, (c) => board[r]?.[bc * 3 + c] ?? 0),
+        ),
+      ),
+  );
+  return rowsOk && colsOk && boxesOk;
+}
+
+export function findEmpty(board: Board): Option.Option<[number, number]> {
+  return Option.fromNullable(
+    board
+      .flatMap((row, r) =>
+        row.map((cell, c) =>
+          cell === 0 ? ([r, c] as [number, number]) : null,
+        ),
+      )
+      .find((x) => x !== null) ?? undefined,
+  );
+}
+
+export function isSafe(
   board: Board,
   row: number,
   col: number,
@@ -35,6 +64,17 @@ function isSafe(
   return true;
 }
 
+function setCellPure(
+  board: Board,
+  row: number,
+  col: number,
+  value: CellValue,
+): Board {
+  return board.map((r, ri) =>
+    ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r,
+  ) as Board;
+}
+
 function solveInternal(board: Board): Option.Option<Board> {
   const empty = findEmpty(board);
   if (Option.isNone(empty)) {
@@ -43,9 +83,7 @@ function solveInternal(board: Board): Option.Option<Board> {
   const [row, col] = empty.value;
   for (let num = 1; num <= 9; num++) {
     if (isSafe(board, row, col, num as CellValue)) {
-      const next = copyBoard(board);
-      const rowData = next[row];
-      if (rowData) rowData[col] = num as CellValue;
+      const next = setCellPure(board, row, col, num as CellValue);
       const result = solveInternal(next);
       if (Option.isSome(result)) return result;
     }
@@ -54,67 +92,23 @@ function solveInternal(board: Board): Option.Option<Board> {
 }
 
 export function solve(board: Board): Option.Option<Board> {
-  return solveInternal(copyBoard(board));
+  return solveInternal(board.map((row) => [...row]) as Board);
+}
+
+function countSolutionsUntilTwo(board: Board): 0 | 1 | 2 {
+  const empty = findEmpty(board);
+  if (Option.isNone(empty)) return 1 as const;
+  const [row, col] = empty.value;
+  let found = 0 as 0 | 1 | 2;
+  for (let num = 1; num <= 9; num++) {
+    if (!isSafe(board, row, col, num as CellValue)) continue;
+    const next = setCellPure(board, row, col, num as CellValue);
+    found = (found + countSolutionsUntilTwo(next)) as 0 | 1 | 2;
+    if (found >= 2) return 2 as const;
+  }
+  return found;
 }
 
 export function hasUniqueSolution(board: Board): boolean {
-  let count = 0;
-  function countSolutions(b: Board): void {
-    if (count > 1) return;
-    const empty = findEmpty(b);
-    if (Option.isNone(empty)) {
-      count++;
-      return;
-    }
-    const [row, col] = empty.value;
-    for (let num = 1; num <= 9; num++) {
-      if (isSafe(b, row, col, num as CellValue)) {
-        const next = copyBoard(b);
-        const rowData = next[row];
-        if (rowData) rowData[col] = num as CellValue;
-        countSolutions(next);
-        if (count > 1) return;
-      }
-    }
-  }
-  countSolutions(copyBoard(board));
-  return count === 1;
-}
-
-export function isValidBoardFast(board: Board): boolean {
-  for (let r = 0; r < 9; r++) {
-    const seen = new Set<number>();
-    for (let c = 0; c < 9; c++) {
-      const val = board[r]?.[c] ?? 0;
-      if (val !== 0) {
-        if (seen.has(val)) return false;
-        seen.add(val);
-      }
-    }
-  }
-  for (let c = 0; c < 9; c++) {
-    const seen = new Set<number>();
-    for (let r = 0; r < 9; r++) {
-      const val = board[r]?.[c] ?? 0;
-      if (val !== 0) {
-        if (seen.has(val)) return false;
-        seen.add(val);
-      }
-    }
-  }
-  for (let br = 0; br < 3; br++) {
-    for (let bc = 0; bc < 3; bc++) {
-      const seen = new Set<number>();
-      for (let r = br * 3; r < br * 3 + 3; r++) {
-        for (let c = bc * 3; c < bc * 3 + 3; c++) {
-          const val = board[r]?.[c] ?? 0;
-          if (val !== 0) {
-            if (seen.has(val)) return false;
-            seen.add(val);
-          }
-        }
-      }
-    }
-  }
-  return true;
+  return countSolutionsUntilTwo(board as Board) === 1;
 }

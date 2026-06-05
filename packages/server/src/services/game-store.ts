@@ -1,4 +1,5 @@
 import {
+  Array,
   Context,
   Effect,
   HashMap,
@@ -45,12 +46,10 @@ export const makeGameStore = Effect.gen(function* (_) {
 
   const generateId: Effect.Effect<string> = Effect.gen(function* (_) {
     const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let id = "";
-    for (let i = 0; i < 12; i++) {
-      const idx = yield* Random.nextIntBetween(0, chars.length);
-      id += chars[idx]!;
-    }
-    return id;
+    const indices = yield* Effect.all(
+      Array.makeBy(12, () => Random.nextIntBetween(0, chars.length)),
+    );
+    return indices.map((i) => chars[i]!).join("");
   });
 
   const create = (
