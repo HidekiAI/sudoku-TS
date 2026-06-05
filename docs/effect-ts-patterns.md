@@ -21,6 +21,7 @@ const x = result.value                  // ← yield* evaluates to this
 ```
 
 effect-ts uses this as a **request-response channel**:
+
 1. `yield* effect` — the effect object is iterable: its first `.next()` yields itself (the descriptor)
 2. That `yield` sends the descriptor up to effect-ts's runtime (the caller of `.next()`)
 3. The runtime interprets the descriptor (runs the computation, resolves dependencies, etc.)
@@ -30,37 +31,37 @@ effect-ts uses this as a **request-response channel**:
 
 Compare to other languages:
 
-| Language | Equivalent | What it unwraps | How it works |
-|----------|-----------|-----------------|--------------|
-| JS `await` | `const x = await promise` | `Promise<A>` → `A` | language built-in, hardcoded to Promise |
-| F# `let!` | `let! x = expr` | any monadic type `M<A>` → `A` | computation expression builder desugaring |
-| JS `yield*` | `const x = yield* effect` | any iterable → return value | generator protocol delegation |
+| Language    | Equivalent                | What it unwraps               | How it works                              |
+| ----------- | ------------------------- | ----------------------------- | ----------------------------------------- |
+| JS `await`  | `const x = await promise` | `Promise<A>` → `A`            | language built-in, hardcoded to Promise   |
+| F# `let!`   | `let! x = expr`           | any monadic type `M<A>` → `A` | computation expression builder desugaring |
+| JS `yield*` | `const x = yield* effect` | any iterable → return value   | generator protocol delegation             |
 
 ### Why `function*` over `async function`?
 
 Both let you write sequential-looking code over non-immediate values, but they differ in **who drives**:
 
-| | `async function` | `function*` |
-|---|---|---|
-| Returns | `Promise<A>` | `Generator<A>` |
-| Pauses on | `await` | `yield` / `yield*` |
-| Resumes when | promise resolves | caller calls `.next(val)` |
-| Control direction | **push** — promise pushes result when ready | **pull** — caller pulls values via `.next()` |
-| Eagerness | `async fn()` starts a promise **immediately** | `function*()` returns a lazy descriptor — nothing runs until `.next()` |
+|                   | `async function`                              | `function*`                                                            |
+| ----------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
+| Returns           | `Promise<A>`                                  | `Generator<A>`                                                         |
+| Pauses on         | `await`                                       | `yield` / `yield*`                                                     |
+| Resumes when      | promise resolves                              | caller calls `.next(val)`                                              |
+| Control direction | **push** — promise pushes result when ready   | **pull** — caller pulls values via `.next()`                           |
+| Eagerness         | `async fn()` starts a promise **immediately** | `function*()` returns a lazy descriptor — nothing runs until `.next()` |
 
 ```javascript
 async function push() {
-  const x = await fetch("/data")  // microtask queue drives this
-  return x.json()
+  const x = await fetch("/data"); // microtask queue drives this
+  return x.json();
 }
 
 function* pull() {
-  const x = yield fetch("/data")  // caller decides when via .next()
-  return x.json()
+  const x = yield fetch("/data"); // caller decides when via .next()
+  return x.json();
 }
 ```
 
-This makes generators **pull-based/deferred** — the runtime sees every yielded Effect descriptor before deciding what to do. With `async/await`, control is handed to the Promise microtask queue at the first `await`, and you can no longer intercept, retry, or mock individual steps.
+This makes generators **pull-based/deferred** (aka Lazy evaluation/deferred execution, "Effect as data", or in my term "lazy-friendly") — the runtime sees every yielded Effect descriptor before deciding what to do. With `async/await`, control is handed to the Promise microtask queue at the first `await`, and you can no longer intercept, retry, or mock individual steps.
 
 effect-ts exploits this: because `Effect.gen` uses `function*`, the runtime is a plain loop calling `.next()` — it can run effects synchronously, asynchronously, in tests with mocked dependencies, with retry logic, with logging, or over the wire, all without changing the generator code.
 
@@ -72,17 +73,20 @@ The core pattern: declare once, get runtime validation + TypeScript types from t
 
 ```typescript
 // Constrained types with piped refinements
-const CellValueSchema = Schema.Number.pipe(Schema.int(), Schema.between(0, 9))
+const CellValueSchema = Schema.Number.pipe(Schema.int(), Schema.between(0, 9));
 
 // Fixed-length arrays
-const RowSchema = Schema.Array(CellValueSchema).pipe(Schema.minItems(9), Schema.maxItems(9))
+const RowSchema = Schema.Array(CellValueSchema).pipe(
+  Schema.minItems(9),
+  Schema.maxItems(9),
+);
 
 // Structs — automatic type inference
 const CoordSchema = Schema.Struct({
   row: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
   col: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
-})
-type Coord = Schema.Schema.Type<typeof CoordSchema>
+});
+type Coord = Schema.Schema.Type<typeof CoordSchema>;
 // → { readonly row: number; readonly col: number }
 ```
 
@@ -104,7 +108,7 @@ const MoveSchema = Schema.TaggedUnion("_tag")({
     col: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
   }),
   Quit: Schema.Struct({ _tag: Schema.Literal("Quit") }),
-})
+});
 // type Move = { _tag: "PlaceNumber"; row: number; col: number; value: number }
 //            | { _tag: "Erase"; row: number; col: number }
 //            | { _tag: "Quit" }
@@ -114,18 +118,18 @@ const MoveSchema = Schema.TaggedUnion("_tag")({
 
 Across the entire codebase — no mutation, no class setters, no `void` returns.
 
-> **Note:** effect-ts **rewards** immutability — its APIs (`pipe`, `Ref.update`, `HashMap`, Schema decode returning fresh objects) all compose naturally with pure data flow — but it does not *enforce* it. You can absolutely abuse it:
+> **Note:** effect-ts **rewards** immutability — its APIs (`pipe`, `Ref.update`, `HashMap`, Schema decode returning fresh objects) all compose naturally with pure data flow — but it does not _enforce_ it. You can absolutely abuse it:
 >
 > ```typescript
 > // This compiles and runs — no guard rails
-> const bad = Effect.gen(function*() {
->   const arr = [1, 2, 3]
->   arr.sort()          // mutable in-place
->   arr.push(4)         // also fine
->   let counter = 0     // mutable state
->   counter++
->   return arr
-> })
+> const bad = Effect.gen(function* () {
+>   const arr = [1, 2, 3];
+>   arr.sort(); // mutable in-place
+>   arr.push(4); // also fine
+>   let counter = 0; // mutable state
+>   counter++;
+>   return arr;
+> });
 > ```
 >
 > It's a carrot, not a stick. sudoku-TS deliberately opts into strict immutability as a **project convention**: every interface field is `readonly`, every state transition returns a new object, every board operation is a pure function. This is an architectural choice, not something effect-ts imposes.
@@ -163,14 +167,19 @@ export function moveCursor(state: ClientState, dRow: number, dCol: number): Clie
 
 ```typescript
 // Immutable set: deep clone → mutate copy → return clone
-export function setCell(board: Board, row: number, col: number, value: CellValue): Board {
-  const copy = copyBoard(board)   // board.map(row => [...row])
-  copy[row]![col] = value
-  return copy                     // original board unchanged
+export function setCell(
+  board: Board,
+  row: number,
+  col: number,
+  value: CellValue,
+): Board {
+  const copy = copyBoard(board); // board.map(row => [...row])
+  copy[row]![col] = value;
+  return copy; // original board unchanged
 }
 
 export function copyBoard(board: Board): Board {
-  return board.map((row) => [...row]) as Board
+  return board.map((row) => [...row]) as Board;
 }
 ```
 
@@ -178,7 +187,7 @@ export function copyBoard(board: Board): Board {
 
 ```typescript
 // Parse + validate JSON body in one step
-const req = yield* Schema.decodeUnknown(CreateGameRequestSchema)(raw)
+const req = yield * Schema.decodeUnknown(CreateGameRequestSchema)(raw);
 // raw: unknown → typed CreateGameRequest
 // Throws ParseError if validation fails — caught by Effect handler
 ```
@@ -203,17 +212,19 @@ Layer.provide(GameStoreLive),
 
 ```typescript
 // Concurrent-safe mutable state
-const store = yield* Ref.SynchronizedRef.make(HashMap.empty<string, GameSession>())
+const store =
+  yield * Ref.SynchronizedRef.make(HashMap.empty<string, GameSession>());
 
 // Read
-const map = yield* store.get
-const session = HashMap.get(map, id)
+const map = yield * store.get;
+const session = HashMap.get(map, id);
 
 // Update (atomic)
-yield* store.update(map => {
-  const updated = { ...session, ...patch }
-  return HashMap.set(map, id, updated)
-})
+yield *
+  store.update((map) => {
+    const updated = { ...session, ...patch };
+    return HashMap.set(map, id, updated);
+  });
 ```
 
 ## Effect.gen (`all packages`)
@@ -221,26 +232,28 @@ yield* store.update(map => {
 ```typescript
 // Imperative-style composition inside Effect
 const createGame: GameService["createGame"] = (raw) =>
-  Effect.gen(function*(_) {
-    const req = yield* Schema.decodeUnknown(CreateGameRequestSchema)(raw)
-    const { puzzle, solution } = yield* generateWithUniqueSolution(req.difficulty)
-    const givenMask = buildGivenMask(puzzle)
-    const id = yield* store.create(req.difficulty, puzzle, solution, givenMask)
-    return { id, board: puzzle, givenMask, difficulty: req.difficulty }
-  })
+  Effect.gen(function* (_) {
+    const req = yield* Schema.decodeUnknown(CreateGameRequestSchema)(raw);
+    const { puzzle, solution } = yield* generateWithUniqueSolution(
+      req.difficulty,
+    );
+    const givenMask = buildGivenMask(puzzle);
+    const id = yield* store.create(req.difficulty, puzzle, solution, givenMask);
+    return { id, board: puzzle, givenMask, difficulty: req.difficulty };
+  });
 ```
 
 ## Effect.iterate (`packages/client/src/main.ts`)
 
 ```typescript
 // Pure functional game loop
-Effect.iterate(initialState, state =>
-  Effect.gen(function*(_) {
-    yield* render(state)
-    const key = yield* readKey()
-    return updateState(state, key)
-  })
-)
+Effect.iterate(initialState, (state) =>
+  Effect.gen(function* (_) {
+    yield* render(state);
+    const key = yield* readKey();
+    return updateState(state, key);
+  }),
+);
 ```
 
 ## Option (`packages/shared/src/engine/solver.ts`)
@@ -248,8 +261,8 @@ Effect.iterate(initialState, state =>
 ```typescript
 // Solver returns Option.Option<Board>
 export function solve(board: Board): Option.Option<Board> {
-  const result = solveInternal(copyBoard(board))
-  return result // Some(board) | None
+  const result = solveInternal(copyBoard(board));
+  return result; // Some(board) | None
 }
 ```
 
@@ -257,49 +270,53 @@ export function solve(board: Board): Option.Option<Board> {
 
 ```typescript
 // Structured error handling
-yield* gameService.createGame(body).pipe(
-  Effect.catchTag("ParseError", (e) =>
-    Effect.succeed(HttpResponse.json({ error: "Invalid request" }, { status: 400 }))
-  ),
-  Effect.catchAll((e) =>
-    Effect.succeed(HttpResponse.json({ error: e.message }, { status: 500 }))
-  )
-)
+yield *
+  gameService.createGame(body).pipe(
+    Effect.catchTag("ParseError", (e) =>
+      Effect.succeed(
+        HttpResponse.json({ error: "Invalid request" }, { status: 400 }),
+      ),
+    ),
+    Effect.catchAll((e) =>
+      Effect.succeed(HttpResponse.json({ error: e.message }, { status: 500 })),
+    ),
+  );
 ```
 
 ## Clock (`packages/server/src/services/game-service.ts`)
 
 ```typescript
-const now = yield* Clock.currentTimeMillis
-const elapsedSeconds = Math.floor((now - session.startTime) / 1000)
+const now = yield * Clock.currentTimeMillis;
+const elapsedSeconds = Math.floor((now - session.startTime) / 1000);
 ```
 
 ## Random (`packages/shared/src/engine/generator.ts`)
 
 ```typescript
-const idx = yield* Random.nextIntBetween(0, chars.length)
+const idx = yield * Random.nextIntBetween(0, chars.length);
 ```
 
 ## HttpClient (`packages/client/src/api/`)
 
 ```typescript
-const client = HttpClient.fetch()
-const response = yield* client.post("http://localhost:3000/api/games", {
-  body: JSON.stringify({ difficulty }),
-  headers: { "content-type": "application/json" }
-})
-const data = yield* response.json
+const client = HttpClient.fetch();
+const response =
+  yield *
+  client.post("http://localhost:3000/api/games", {
+    body: JSON.stringify({ difficulty }),
+    headers: { "content-type": "application/json" },
+  });
+const data = yield * response.json;
 ```
 
 ## Terminal I/O (`packages/client/src/ui/`)
 
 ```typescript
 // Read keypress via raw stdin
-const readKey: Effect.Effect<KeyEvent> =
-  Effect.async<KeyEvent>((resume) => {
-    process.stdin.setRawMode(true)
-    process.stdin.once("data", (data) => {
-      resume(Effect.succeed(parseKey(data)))
-    })
-  })
+const readKey: Effect.Effect<KeyEvent> = Effect.async<KeyEvent>((resume) => {
+  process.stdin.setRawMode(true);
+  process.stdin.once("data", (data) => {
+    resume(Effect.succeed(parseKey(data)));
+  });
+});
 ```
