@@ -213,6 +213,16 @@ const req = yield * Schema.decodeUnknown(CreateGameRequestSchema)(raw);
 
 The functional equivalent of constructor injection — services declare their requirements via `Tag`, implementations get wired together at the program edge. Instead of passing dependencies through constructors or globals, every dependency is resolved from context at runtime.
 
+This is one of effect-ts's headline features. Most TypeScript/JS FP libraries have no DI story — you manage dependencies via closures or module-level singletons. effect-ts provides a **first-class, type-safe, composable** DI mechanism built into the core library.
+
+### Why it matters
+
+**1. Compile-time verification.** If `GameService` requires `GameStore` and you forget to provide it, the program doesn't compile. No runtime "cannot read property of undefined" from a missing dependency.
+
+**2. Layer composition.** `Layer.provide(ServiceLive, StoreLive)` builds the dependency graph declaratively. Swapping implementations for tests is one line — replace the Live Layer with a Test Layer.
+
+**3. Scoped resources.** Layers can manage lifecycle (acquire/release). Database connections, file handles, server sockets are created and torn down automatically via effect-ts's `Scope` — no manual `dispose()` calls or `finally` blocks.
+
 ```typescript
 // 1. Define service interface
 export interface GameStore { ... }

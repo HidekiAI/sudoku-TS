@@ -30,6 +30,8 @@ Full-stack Sudoku game built with TypeScript and [effect-ts](https://effect.webs
 - `Layer.effect` — wrap implementations into layers
 - `Effect.provideService` / `Effect.provide` — compose services at the edge
 - `Layer.provide` — layer-to-layer provisioning
+- Compile-time verification: missing dependencies fail at compile time, not runtime
+- Layer composition: swap entire dependency graphs for testing with one line
 
 ### State Management (effect/ Ref)
 `packages/server/src/services/game-store.ts`
