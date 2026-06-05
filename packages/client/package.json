@@ -1,0 +1,27 @@
+{
+  "name": "@sudoku-ts/client",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts",
+    "dev:debug": "SUDOKU_DEBUG=1 tsx watch src/main.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+"@effect/platform": "^0.89.0",
+"@effect/platform-node": "^0.89.0",
+    "@sudoku-ts/shared": "workspace:*",
+    "chalk": "^5.4.0",
+    "effect": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}
