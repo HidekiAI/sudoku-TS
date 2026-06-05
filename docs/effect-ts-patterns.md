@@ -38,28 +38,89 @@ Compare to other languages:
 
 `yield*` is **protocol-based**, not hardcoded to one type — the same syntax works on anything implementing `[Symbol.iterator]()`. This is why effect-ts chose it over `await`: you can swap the runtime (sync, async, test, retry, etc.) without changing your code.
 
-## Schema (`packages/shared/src/schemas/`)
+## Schema — Single-Declaration Validation + Type Inference (`packages/shared/src/schemas/`)
+
+The core pattern: declare once, get runtime validation + TypeScript types from the same source.
 
 ```typescript
-// Runtime validation + TypeScript type inference in one declaration
-const DifficultySchema = Schema.Literal("easy", "medium", "hard", "expert")
-type Difficulty = Schema.Schema.Type<typeof DifficultySchema>
-// → "easy" | "medium" | "hard" | "expert"
-
 // Constrained types with piped refinements
-const CellValueSchema = Schema.Number.pipe(
-  Schema.int(),
-  Schema.between(0, 9)
-)
+const CellValueSchema = Schema.Number.pipe(Schema.int(), Schema.between(0, 9))
 
 // Fixed-length arrays
-const RowSchema = Schema.Array(CellValueSchema).pipe(
-  Schema.minItems(9),
-  Schema.maxItems(9)
-)
+const RowSchema = Schema.Array(CellValueSchema).pipe(Schema.minItems(9), Schema.maxItems(9))
+
+// Structs — automatic type inference
+const CoordSchema = Schema.Struct({
+  row: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+  col: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+})
+type Coord = Schema.Schema.Type<typeof CoordSchema>
+// → { readonly row: number; readonly col: number }
 ```
 
-## Schema Decode (`packages/server/src/services/game-service.ts`)
+### Discriminated Unions with Schema.TaggedUnion
+
+Not currently used in this project, but the natural Schema-native way to model `KeyEvent` or `ClientState.phase`:
+
+```typescript
+const MoveSchema = Schema.TaggedUnion("_tag")({
+  PlaceNumber: Schema.Struct({
+    _tag: Schema.Literal("PlaceNumber"),
+    row: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+    col: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+    value: Schema.Number.pipe(Schema.int(), Schema.between(1, 9)),
+  }),
+  Erase: Schema.Struct({
+    _tag: Schema.Literal("Erase"),
+    row: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+    col: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+  }),
+  Quit: Schema.Struct({ _tag: Schema.Literal("Quit") }),
+})
+// type Move = { _tag: "PlaceNumber"; row: number; col: number; value: number }
+//            | { _tag: "Erase"; row: number; col: number }
+//            | { _tag: "Quit" }
+```
+
+## Immutability (the bedrock FP pattern)
+
+Across the entire codebase — no mutation, no class setters, no `void` returns.
+
+**Client state** (`packages/client/src/state.ts`) — every field is `readonly`, every update returns a new object:
+
+```typescript
+export interface ClientState {
+  readonly phase: "menu" | "connecting" | "playing" | "completed" | "quit"
+  readonly board: Board
+  readonly cursor: { readonly row: number; readonly col: number }
+  // ...
+}
+
+// Always returns new state, never mutates:
+export function setGame(state: ClientState, ...): ClientState {
+  return { ...state, phase: "playing", board, ... }
+}
+export function moveCursor(state: ClientState, dRow: number, dCol: number): ClientState {
+  return { ...state, cursor: { row, col } }
+}
+```
+
+**Board operations** (`packages/shared/src/engine/board.ts`) — pure functions, no side effects:
+
+```typescript
+// Immutable set: deep clone → mutate copy → return clone
+export function setCell(board: Board, row: number, col: number, value: CellValue): Board {
+  const copy = copyBoard(board)   // board.map(row => [...row])
+  copy[row]![col] = value
+  return copy                     // original board unchanged
+}
+
+export function copyBoard(board: Board): Board {
+  return board.map((row) => [...row]) as Board
+}
+```
+
+**Rule of thumb:** if a function returns `void` and takes data as an argument, it's probably not FP. Here, every data transformation returns a new value. The only mutation is inside `SynchronizedRef` (managed by effect-ts) and `console.log` / `process.stdin` (terminal I/O, wrapped as `Effect.sync`).
 
 ```typescript
 // Parse + validate JSON body in one step
