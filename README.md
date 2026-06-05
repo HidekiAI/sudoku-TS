@@ -12,17 +12,6 @@ Monorepo (pnpm workspace) with three packages:
 | `@sudoku-ts/server` | HTTP game API | effect/Schema, @effect/platform, effect/Layer, effect/Ref |
 | `@sudoku-ts/client` | Terminal TUI | @effect/platform (HttpClient, Terminal), chalk |
 
-## Why effect/Schema over Zod?
-
-Both provide runtime validation + TypeScript type inference, but effect/Schema is the natural fit here:
-
-- **Single paradigm** — no impedance mismatch between validation and the rest of the stack (Effect, Layer, Ref, etc.)
-- **ParseError** integrates natively with Effect's error channel via `Effect.catchTag`
-- **Schema transformations** (`pipe`, `compose`) follow the same functional patterns used everywhere else
-- **JSON Schema generation** comes free for documentation
-
-See [ADR 003](docs/decisions.md#003--effectschema-over-zod) for the full rationale.
-
 ## Quick Start
 
 ```bash
