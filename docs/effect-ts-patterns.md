@@ -228,7 +228,30 @@ return { ...state, statuss: "completed" }
 // No error. Now state has both `status` and `statuss`.
 ```
 
-In F#, the `with` keyword has the same problem in practice — if a field name matches on a *different* record type, the F# compiler may infer the wrong type entirely when combined with type inference.
+In F#, the `with` keyword catches typos at compile time — `{ state with Statuss = "x" }` is a compiler error. But a subtler bug arises from **type inference ambiguity** when two record types share field names:
+
+```fsharp
+type Person   = { Name: string; Age: int }
+type Pet      = { Name: string; Species: string }
+
+let p = { Name = "Fluffy"; Age = 3 }
+// F# infers this as Pet (first match by field names),
+// then errors: Pet has no Age.
+// It backtracks to Person — but in complex cases the
+// inferred type can silently be the wrong one.
+
+// Worse — overlapping fields across related types:
+type Person   = { Name: string; Age: int }
+type Employee = { Name: string; Age: int; Salary: decimal }
+
+let x = { Name = "Alice"; Age = 30 }        // infers Person
+let y = { x with Salary = 5000m }            // Error: Person has no Salary
+// But if the developer intended x to be Employee,
+// the error message is confusing — they thought
+// `with` was extending the record.
+```
+
+The F# fix is to annotate the binding: `let x: Employee = ...`. effect-ts avoids both problems entirely — `Struct.update` explicitly names the target type via the generic parameter, and TypeScript never guesses types from field names alone.
 
 effect-ts provides two typed alternatives that reject misspelled keys and wrong value types at compile time:
 
