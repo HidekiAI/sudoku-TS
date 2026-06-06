@@ -1,6 +1,8 @@
 # sudoku-TS
 
-Full-stack Sudoku game built with TypeScript and [effect-ts](https://effect.website/) (MIT) — a learning project demonstrating functional programming end-to-end.
+Full-stack Sudoku game built with TypeScript and [effect-ts](https://effect.website/) — a learning project demonstrating functional programming end-to-end.
+
+> **[effect.website](https://effect.website/)** — the Effect ecosystem: Schema, Layer/DI, Queue, Clock, Random, Config, HttpClient, and more.
 
 ## FP Features Demonstrated
 
@@ -17,8 +19,9 @@ Full-stack Sudoku game built with TypeScript and [effect-ts](https://effect.webs
 `all packages`
 - `Effect.gen` — imperative-style generator composition throughout
 - `Effect.pipe` — fluent composition of effects
-- `Effect.iterate` — pure functional game loop on the client
-- `Effect.async` — callback-based stdin keypress reading
+- Recursive game loop — pure functional loop with explicit `readKey` parameter
+- `Queue.unbounded` — push-to-pull bridge for raw stdin keypress events
+- `Struct.evolve` — typed copy-and-update replacing unchecked `...spread`
 - `Effect.race` / `Effect.sleep` — connection retry with timeout
 - `Effect.fork` / `Effect.never` — background server fiber
 - `Effect.ensuring` — guaranteed stdin restoration on exit
