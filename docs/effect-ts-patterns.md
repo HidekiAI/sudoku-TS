@@ -34,6 +34,8 @@ Compare to other languages:
 | Language    | Equivalent                | What it unwraps               | How it works                              |
 | ----------- | ------------------------- | ----------------------------- | ----------------------------------------- |
 | JS `await`  | `const x = await promise` | `Promise<A>` → `A`            | language built-in, hardcoded to Promise   |
+| Rust `.await` | `let x = expr.await`    | `impl Future<Output = A>` → `A`| language built-in, hardcoded to Future    |
+| Rust `?`    | `let x = expr?`           | `Result<T,E>` or `Option<T>` → `T` | early-return operator, hardcoded to Result |
 | F# `let!`   | `let! x = expr`           | any monadic type `M<A>` → `A` | computation expression builder desugaring |
 | JS `yield*` | `const x = yield* effect` | any iterable → return value   | generator protocol delegation             |
 
@@ -258,6 +260,21 @@ let y = { x with Salary = 5000m }            // Error: Person has no Salary
 // the error message is confusing — they thought
 // `with` was extending the record.
 ```
+
+In Rust, struct update syntax (`..other`) is **safe** — naming a non-existent field is a compile error, and type inference never substitutes a different struct:
+
+```rust
+struct Person { name: String, age: i32 }
+
+let updated = Person {
+    name: "Bob".to_string(),
+    ..original         // fills in age from original
+};
+// let bad = Person { name: "x".to_string(), nam: "y".to_string(), ..original };
+//                                    ^^^^ Error: struct Person has no field 'nam'
+```
+
+Rust sidesteps the ambiguity problem because it has **nominal typing** — `Person` and `Employee` are distinct types even if they share every field; `..` never infers the wrong one. effect-ts's `Struct.evolve` achieves the same guarantee in TypeScript's structural type system by tying every key to the explicit target type.
 
 The F# fix is to annotate the binding: `let x: Employee = ...`. effect-ts avoids both problems entirely — `Struct.update` explicitly names the target type via the generic parameter, and TypeScript never guesses types from field names alone.
 
