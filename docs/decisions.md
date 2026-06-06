@@ -104,3 +104,19 @@
 **Decision:** OpenCode configuration files (`.opencode/`, `AGENTS.md`, `opencode.json`) are welcome in repos. Files related to Claude AI (`CLAUDE.md`, `.claude/`) must never be committed.
 
 **Consequences:** Clear boundary — opencode project tooling is shared; Claude-specific instructions stay local only.
+
+---
+
+## 011 — Hints provide annotations, not answers (future)
+
+**Context:** Current hint mechanic fills the correct value into the cell, which gives away the answer. A more instructive approach is to populate the cell's pencil-mark annotations with valid candidates.
+
+**Decision (deferred):** When implemented, `POST /api/games/:id/hints` should compute all valid candidates for the target cell and return them as an annotation set. The client renders them as small numbers in the cell (standard Sudoku pencil-mark style). The cell is *not* filled — the player still has to decide.
+
+**Consequences:**
+- Needs a per-cell annotation data structure: `Set<CellValue>[][]` or `boolean[][][]`
+- Server computes candidates via `isSafe(board, row, col, num)` for num 1-9
+- Client render needs annotation display (e.g. 3×3 mini-grid of small numbers)
+- Input mode toggle needed: "place value" vs "toggle annotation"
+- Annotations must be stored server-side for persistence (or reconstructed from board state)
+- Hint endpoint returns `{ row, col, candidates: CellValue[] }` instead of `{ value: CellValue }`

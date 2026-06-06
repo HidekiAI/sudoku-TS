@@ -217,6 +217,84 @@ const req = yield * Schema.decodeUnknown(CreateGameRequestSchema)(raw);
 // Throws ParseError if validation fails — caught by Effect handler
 ```
 
+## Struct.update / Struct.evolve / Lens — Typed Copy-and-Update
+
+The `...spread` pattern (`{ ...obj, field: value }`) is the standard way to produce a new object with one field changed. It's simple and works, but it has no guard rails — a typo introduces a **new property** silently rather than producing an error:
+
+```typescript
+// spread silently creates a new property instead of updating one
+return { ...state, statuss: "completed" }
+//       ^^ "statuss" is NOT a field of ClientState
+// No error. Now state has both `status` and `statuss`.
+```
+
+In F#, the `with` keyword has the same problem in practice — if a field name matches on a *different* record type, the F# compiler may infer the wrong type entirely when combined with type inference.
+
+effect-ts provides two typed alternatives that reject misspelled keys and wrong value types at compile time:
+
+### Struct.update / Struct.evolve
+
+```typescript
+import { Struct } from "effect"
+
+// Single field — key must exist on the type, fn signature matches the field
+const next = Struct.update("status", () => "completed" as const)(state)
+// Struct.update("statuss", () => "completed")(state)
+//   ^^ Error: '"statuss"' is not a key of ClientState
+
+// Multiple fields — every key is checked, every fn is type-checked per field
+const evolved = Struct.evolve(state, {
+  phase: () => "completed" as const,
+  status: () => "completed" as const,
+  message: () => "Puzzle solved!" as const,
+  // turkeys: () => 0,      // Error: not a key of ClientState
+  // hintsUsed: (s: string) => s + 1, // Error: hintsUsed is number, not string
+})
+```
+
+### Lens (optics)
+
+`Lens` is a composable, reusable path into a nested structure. Once created, it can be used to read, set, or transform a nested value:
+
+```typescript
+import { Lens, pipe } from "effect"
+
+// Create a Lens into a specific property
+const cursorRow = Lens.id<ClientState>()
+  .pipe(Lens.property("cursor"))
+  .pipe(Lens.property("row"))
+
+// Read through the lens
+pipe(state, Lens.get(cursorRow))   // → number
+
+// Set through the lens (returns new object, never mutates)
+pipe(state, Lens.set(cursorRow, 3)) // → { ...state, cursor: { ...state.cursor, row: 3 } }
+
+// Transform through the lens
+pipe(state, Lens.update(cursorRow, (r) => Math.min(r + 1, 8)))
+```
+
+Lenses compose: a single `Lens<Whole, Part>` plus `pipe(Lens.set(...))` replaces nested spread chains.
+
+### Comparison with earlier code
+
+Compare:
+
+```typescript
+// Spread — works, but unchecked at the type level
+return { ...state, phase: "completed", status: "completed" }
+
+// Struct.evolve — every key and value is type-checked
+return Struct.evolve(state, {
+  phase: () => "completed" as const,
+  status: () => "completed" as const,
+})
+```
+
+### Not currently used in this project
+
+The project uses plain `...spread` everywhere (e.g. `state.ts`, `board.ts`). This section documents the safer alternative — adopting `Struct.update`/`Struct.evolve`/`Lens` would eliminate an entire class of runtime bugs (typo-driven property injection) at zero runtime cost.
+
 ## Layer / Tag DI (`packages/server/src/services/`)
 
 The functional equivalent of constructor injection — services declare their requirements via `Tag`, implementations get wired together at the program edge. Instead of passing dependencies through constructors or globals, every dependency is resolved from context at runtime.
