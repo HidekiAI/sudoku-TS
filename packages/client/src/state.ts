@@ -1,3 +1,4 @@
+import { Struct } from "effect";
 import type {
   Board,
   Difficulty,
@@ -46,7 +47,10 @@ export function setBoard(
   board: Board,
   givenMask: boolean[][],
 ): ClientState {
-  return { ...state, board, givenMask };
+  return Struct.evolve(state, {
+    board: () => board,
+    givenMask: () => givenMask,
+  });
 }
 
 export function setGame(
@@ -56,23 +60,22 @@ export function setGame(
   board: Board,
   givenMask: boolean[][],
 ): ClientState {
-  return {
-    ...state,
-    phase: "playing",
-    gameId,
-    difficulty,
-    board,
-    givenMask,
-    conflicts: Array.from({ length: 9 }, () =>
-      Array.from({ length: 9 }, () => false),
-    ),
-    cursor: { row: 0, col: 0 },
-    status: "active",
-    message: "arrows/wasd/hjkl to move | 1-9 place | 0 erase | ? hint | q quit",
-    hintsUsed: 0,
-    movesCount: 0,
-    elapsedSeconds: 0,
-  };
+  return Struct.evolve(state, {
+    phase: () => "playing" as const,
+    gameId: () => gameId,
+    difficulty: () => difficulty,
+    board: () => board,
+    givenMask: () => givenMask,
+    conflicts: () =>
+      Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => false)),
+    cursor: () => ({ row: 0, col: 0 }),
+    status: () => "active" as const,
+    message: () =>
+      "arrows/wasd/hjkl to move | 1-9 place | 0 erase | ? hint | q quit",
+    hintsUsed: () => 0,
+    movesCount: () => 0,
+    elapsedSeconds: () => 0,
+  });
 }
 
 export function updateBoard(
@@ -86,15 +89,14 @@ export function updateBoard(
   if (conflict) {
     newConflicts[conflict.row]![conflict.col] = conflict.isConflict;
   }
-  return {
-    ...state,
-    board,
-    movesCount: state.movesCount + 1,
-    message,
-    conflicts: newConflicts,
-    phase: solved ? "completed" : state.phase,
-    status: solved ? "completed" : state.status,
-  };
+  return Struct.evolve(state, {
+    board: () => board,
+    movesCount: (n) => n + 1,
+    message: () => message,
+    conflicts: () => newConflicts,
+    phase: (p) => (solved ? "completed" : p),
+    status: (s) => (solved ? "completed" : s),
+  });
 }
 
 export function moveCursor(
@@ -104,24 +106,27 @@ export function moveCursor(
 ): ClientState {
   const row = Math.max(0, Math.min(8, state.cursor.row + dRow));
   const col = Math.max(0, Math.min(8, state.cursor.col + dCol));
-  return { ...state, cursor: { row, col } };
+  return Struct.evolve(state, { cursor: () => ({ row, col }) });
 }
 
 export function showMessage(state: ClientState, message: string): ClientState {
-  return { ...state, message };
+  return Struct.evolve(state, { message: () => message });
 }
 
 export function quit(state: ClientState): ClientState {
-  return { ...state, phase: "quit" };
+  return Struct.evolve(state, { phase: () => "quit" as const });
 }
 
 export function setDifficulty(
   state: ClientState,
   difficulty: Difficulty,
 ): ClientState {
-  return { ...state, difficulty };
+  return Struct.evolve(state, { difficulty: () => difficulty });
 }
 
 export function setConnecting(state: ClientState): ClientState {
-  return { ...state, phase: "connecting", message: "Connecting..." };
+  return Struct.evolve(state, {
+    phase: () => "connecting" as const,
+    message: () => "Connecting...",
+  });
 }

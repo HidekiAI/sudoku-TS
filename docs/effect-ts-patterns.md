@@ -161,7 +161,7 @@ Across the entire codebase — no mutation, no class setters, no `void` returns.
 >
 > Compare to OOP where a method call might traverse 4 levels of inheritance before landing on the actual implementation. effect-ts's explicitness means what you see is what runs — less iceberg.
 
-**Client state** (`packages/client/src/state.ts`) — every field is `readonly`, every update returns a new object:
+**Client state** (`packages/client/src/state.ts`) — every field is `readonly`, every update returns a new object via `Struct.evolve` (typed copy-and-update, see below):
 
 ```typescript
 export interface ClientState {
@@ -171,12 +171,20 @@ export interface ClientState {
   // ...
 }
 
-// Always returns new state, never mutates:
+// Typed copy-and-update — each key must exist on ClientState,
+// each value is a transform function checked against the field type:
 export function setGame(state: ClientState, ...): ClientState {
-  return { ...state, phase: "playing", board, ... }
+  return Struct.evolve(state, {
+    phase: () => "playing" as const,
+    gameId: () => gameId,
+    board: () => board,
+    // ...
+  })
 }
 export function moveCursor(state: ClientState, dRow: number, dCol: number): ClientState {
-  return { ...state, cursor: { row, col } }
+  return Struct.evolve(state, {
+    cursor: () => ({ row, col }),
+  })
 }
 ```
 
@@ -299,9 +307,51 @@ pipe(state, Lens.update(cursorRow, (r) => Math.min(r + 1, 8)))
 
 Lenses compose: a single `Lens<Whole, Part>` plus `pipe(Lens.set(...))` replaces nested spread chains.
 
-### Comparison with earlier code
+### Migration: what we changed from (and why it's tempting not to)
 
-Compare:
+Before this project adopted `Struct.evolve`, every state transition used spread:
+
+```typescript
+// Before — tempting because it's so short:
+export function updateBoard(state, board, message, solved, conflict) {
+  return {
+    ...state,                             // spread all existing fields
+    board,                                // override board
+    movesCount: state.movesCount + 1,     // increment
+    message,                              // override message
+    conflicts: newConflicts,               // override conflicts
+    phase: solved ? "completed" : state.phase,  // conditional
+    status: solved ? "completed" : state.status, // conditional
+  }
+}
+```
+
+The temptation is the **10:1 signal-to-noise ratio** — every line is meaningful, nothing is boilerplate. But it only takes one typo:
+
+```typescript
+return { ...state, messsage: "hi" }  // `messsage` is a new property, not an error
+```
+
+After:
+
+```typescript
+// After — every key is checked to exist, every transform fn is type-checked:
+export function updateBoard(state, board, message, solved, conflict) {
+  return Struct.evolve(state, {
+    board: () => board,
+    movesCount: (n) => n + 1,            // (n: number) => number — checked
+    message: () => message,
+    conflicts: () => newConflicts,
+    phase: (p) => solved ? "completed" : p,  // (p: "menu"|"playing"|...) => same type
+    status: (s) => solved ? "completed" : s,  // (s: GameStatus) => GameStatus
+    // mesage: () => "x"                 // Error: not a key of ClientState
+  })
+}
+```
+
+The `(n) => n + 1` pattern shows the transform explicitly — `movesCount` is a number and the function adds 1. A typo on the key name is a compile error instead of a silent bug.
+
+The comparison with `...spread`:
 
 ```typescript
 // Spread — works, but unchecked at the type level
@@ -314,9 +364,7 @@ return Struct.evolve(state, {
 })
 ```
 
-### Not currently used in this project
-
-The project uses plain `...spread` everywhere (e.g. `state.ts`, `board.ts`). This section documents the safer alternative — adopting `Struct.update`/`Struct.evolve`/`Lens` would eliminate an entire class of runtime bugs (typo-driven property injection) at zero runtime cost.
+### Used throughout `packages/client/src/state.ts`
 
 ## Layer / Tag DI (`packages/server/src/services/`)
 
