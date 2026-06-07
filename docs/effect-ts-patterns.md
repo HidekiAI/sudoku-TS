@@ -583,3 +583,67 @@ export function makeReadKey(): Effect.Effect<{
 ```
 
 The queue acts as a **buffer between the push-based `onData` callback and the pull-based game loop** — the callback writes events as they arrive, and the game loop reads them one by one via `Queue.take`, which naturally suspends when the queue is empty.
+
+## Error Handling Philosophy — Like Rust `Result<T, E>`, Never `throw`
+
+`Effect<T, E, R>` is the direct analogue of `Result<T, E>` in Rust:
+
+| Concept | Rust | effect-ts |
+|---------|------|-----------|
+| Success type | `Ok(T)` | `Effect<T, ...>` (success channel) |
+| Error type | `Err(E)` | `Effect<..., E, ...>` (error channel) |
+| Requirements / context | — | `Effect<..., ..., R>` (dependency channel) |
+
+**Core discipline**: Every function that can fail **must** declare its error type in the `E` channel. Errors are **never silently swallowed** — no try/catch hiding, no `catch {}` blocks, no `.unwrap()` equivalents in production.
+
+### Rules enforced in this project
+
+1. **No hidden exceptions.** If an operation can fail, its return type reflects it:
+   ```typescript
+   // ❌ Bad: Hides the failure path
+   const createGame = (raw: unknown): Effect<CreateGameResponse>
+   
+   // ✅ Good: Declares every possible error
+   const createGame = (
+     raw: unknown,
+   ): Effect<CreateGameResponse, HttpClientError | ParseResult.ParseError>
+   ```
+
+2. **Error handlers sit at the top, never in the middle.** Only the outermost chain (e.g., `main.ts`, route handlers) calls `Effect.catchAll` to convert errors to user-facing messages. Middle layers propagate errors upward through `yield*`:
+   ```typescript
+   // Top-level (main.ts) — the ONLY place that catches errors:
+   yield* api.createGame(difficulty).pipe(
+     Effect.catchAll(() => Effect.succeed(Option.none())),
+   )
+   ```
+
+3. **No `unwrap()` / non-null assertions.** TypeScript's `!` and `as` are the equivalent of Rust's `.unwrap()` — they bypass compile-time guarantees and can panic at runtime. Every non-null assertion in this project was replaced with `Option` / `??` / `Schema.decodeUnknown`:
+   ```typescript
+   // ❌ Bad: non-null assertion (like Rust's .unwrap())
+   const byte = buf[cursor]!
+   
+   // ✅ Good: optional chaining with fallback (like Rust's unwrap_or)
+   const byte = buf[cursor] ?? 0
+   ```
+
+4. **ATOMICITY: SynchronizedRef.modify over get-then-update.** The TOCTOU race between `store.get(id)` and `store.update(id, patch)` is the effect-ts equivalent of a double-checked locking bug. The fix is `store.modify(id, fn)` which performs the entire read-modify-write atomically — the callback `fn` is a pure function (no effects), so the runtime can guarantee linearizability:
+   ```typescript
+   // ❌ Bad: Non-atomic read-modify-write (TOCTOU race)
+   const session = yield* store.get(id)
+   const boardAfter = setCell(session.board, row, col, value)
+   yield* store.update(id, { board: boardAfter })
+   
+   // ✅ Good: Atomic modify via SynchronizedRef.modify
+   return yield* store.modify(id, (session) => {
+     const boardAfter = setCell(session.board, row, col, value)
+     return [response, { ...session, board: boardAfter }]
+   })
+   ```
+
+> **Rust analogy**: `store.modify` is to `get`+`update` what `RefCell::borrow_mut` is to separate `borrow`+`replace` — the latter pair invites data races; the former guarantees exclusive access for the duration of the operation.
+
+### Exceptions (literally)
+
+The one place where `try/catch` is tolerated: **interop with callback-based APIs** where the boundary between Effect and imperative code makes `Effect.catchAll` impractical. In those cases:
+- The catch block **must** document why the suppression is safe (e.g., `"stdin might already be destroyed — non-fatal during cleanup"`)
+- The catch should be as narrow as possible (no `catch {}` — always name the specific error if the API supports it)

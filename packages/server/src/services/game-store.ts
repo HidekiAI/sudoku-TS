@@ -35,6 +35,16 @@ export interface GameStore {
     id: string,
     patch: Partial<GameSession>,
   ) => Effect.Effect<void>;
+  // Fix: Add modify for atomic read-modify-write.
+  // Previous pattern: get(id) → compute → update(id) had a TOCTOU race
+  // condition between the read and the write. modify uses SynchronizedRef.modify
+  // to perform the entire operation atomically, preserving referential transparency.
+  // The callback fn is a pure function (no effects) that receives the current
+  // session and returns [result, newSession].
+  readonly modify: <A>(
+    id: string,
+    fn: (session: GameSession) => readonly [A, GameSession],
+  ) => Effect.Effect<A>;
   readonly exists: (id: string) => Effect.Effect<boolean>;
 }
 
@@ -45,12 +55,17 @@ export const makeGameStore = Effect.gen(function* (_) {
     HashMap.empty<string, GameSession>(),
   );
 
+  // Fix: Non-null assertion bypasses noUncheckedIndexedAccess.
+  // Though Random.nextIntBetween ensures i < chars.length, use
+  // Option.fromNullable + getOrElse for explicit FP unwrapping.
   const generateId: Effect.Effect<string> = Effect.gen(function* (_) {
     const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
     const indices = yield* Effect.all(
       Array.makeBy(12, () => Random.nextIntBetween(0, chars.length)),
     );
-    return indices.map((i) => chars[i]!).join("");
+    return indices
+      .map((i) => Option.getOrElse(Option.fromNullable(chars[i]), () => ""))
+      .join("");
   });
 
   const create = (
@@ -99,13 +114,32 @@ export const makeGameStore = Effect.gen(function* (_) {
       });
     });
 
+  // Fix: Atomic read-modify-write using SynchronizedRef.modify.
+  // The callback fn is a pure synchronous function (no effects), ensuring
+  // referential transparency. This eliminates the TOCTOU race between
+  // separate get and update calls.
+  const modify = <A>(
+    id: string,
+    fn: (session: GameSession) => readonly [A, GameSession],
+  ) =>
+    SynchronizedRef.modify(store, (map) => {
+      const current = HashMap.get(map, id);
+      return Option.match(current, {
+        onNone: () => [undefined as never, map],
+        onSome: (session) => {
+          const [result, newSession] = fn(session);
+          return [result, HashMap.set(map, id, newSession)] as const;
+        },
+      });
+    });
+
   const exists = (id: string) =>
     Effect.gen(function* (_) {
       const map = yield* SynchronizedRef.get(store);
       return HashMap.has(map, id);
     });
 
-  return { create, get, update, exists } as GameStore;
+  return { create, get, update, modify, exists } as GameStore;
 });
 
 export const GameStoreLive = Layer.effect(GameStore, makeGameStore);

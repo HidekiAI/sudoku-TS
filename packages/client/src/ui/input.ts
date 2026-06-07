@@ -59,14 +59,17 @@ function drainBuffer(buf: Buffer): {
       cursor + 2 < buf.length &&
       (buf[cursor + 1] === CSI || buf[cursor + 1] === SS3)
     ) {
-      const kind = parseEscape(buf[cursor + 2]!);
+      // Fix: Non-null assertion on buffer index bypasses noUncheckedIndexedAccess.
+      // Though bounds-checked by `cursor + 2 < buf.length`, use ?? fallback for FP type safety.
+      const kind = parseEscape(buf[cursor + 2] ?? 0);
       if (Option.isSome(kind)) {
         events.push(kind.value);
         cursor += 3;
         continue;
       }
     }
-    const byte = buf[cursor]!;
+    // Fix: Non-null assertion on buffer index. ?? 0 fallback satisfies strict type safety.
+    const byte = buf[cursor] ?? 0;
     if (byte === 0x0d || byte === 0x0a) {
       events.push({ kind: "enter" } as KeyEvent);
       cursor++;
@@ -74,7 +77,8 @@ function drainBuffer(buf: Buffer): {
     }
     if (byte === ESC) {
       if (buf.length - cursor < 3) {
-        pending = buf.subarray(cursor) as Buffer;
+        // Fix: `as Buffer` cast is redundant — Buffer.subarray() already returns Buffer.
+        pending = buf.subarray(cursor);
         return { events, pending };
       }
       cursor++;
@@ -182,8 +186,13 @@ export function makeReadKey(): Effect.Effect<{
         }
         inputPending = Buffer.alloc(0);
         dbg("stdin restored");
+        // Fix: Empty catch block suppresses errors silently, violating FP transparency.
+        // In an ideal FP design this would use Effect.catchAll, but the mixed
+        // Effect/callback boundary makes that impractical here. The suppression is
+        // intentional: stdin may already be destroyed during teardown, and
+        // removeListener/pause/setRawMode failures are non-fatal during cleanup.
       } catch {
-        // stdin might already be destroyed
+        // stdin might already be destroyed — non-fatal during cleanup
       }
     });
 

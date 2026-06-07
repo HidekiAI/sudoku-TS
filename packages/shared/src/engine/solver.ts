@@ -118,6 +118,8 @@ function countSolutionsUntilTwo(board: Board): 0 | 1 | 2 {
   return found;
 }
 
+// Fix: Redundant `as Board` — `board` is already typed Board from signature.
+// The cast adds zero type safety while suppressing valid compiler checks.
 export function hasUniqueSolution(board: Board): boolean {
-  return countSolutionsUntilTwo(board as Board) === 1;
+  return countSolutionsUntilTwo(board) === 1;
 }

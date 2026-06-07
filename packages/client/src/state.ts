@@ -42,16 +42,8 @@ export const initialState: ClientState = {
   elapsedSeconds: 0,
 };
 
-export function setBoard(
-  state: ClientState,
-  board: Board,
-  givenMask: boolean[][],
-): ClientState {
-  return Struct.evolve(state, {
-    board: () => board,
-    givenMask: () => givenMask,
-  });
-}
+// Fix: Unused export — `setBoard` was never imported by any consumer.
+// Removing dead exports keeps the module boundary clean and predictable.
 
 export function setGame(
   state: ClientState,
@@ -78,17 +70,26 @@ export function setGame(
   });
 }
 
+// Fix: Mutation + non-null assertion bypasses FP purity and noUncheckedIndexedAccess.
+// Replaced with a pure `map` that returns a new array — no `!`, no side effects.
 export function updateBoard(
   state: ClientState,
   board: Board,
   message: string,
   solved: boolean,
-  conflict?: { row: number; col: number; isConflict: boolean },
+  conflict?: {
+    readonly row: number;
+    readonly col: number;
+    readonly isConflict: boolean;
+  },
 ): ClientState {
-  const newConflicts = state.conflicts.map((r) => [...r]);
-  if (conflict) {
-    newConflicts[conflict.row]![conflict.col] = conflict.isConflict;
-  }
+  const newConflicts = conflict
+    ? state.conflicts.map((r, ri) =>
+        ri === conflict.row
+          ? r.map((c, ci) => (ci === conflict.col ? conflict.isConflict : c))
+          : r,
+      )
+    : state.conflicts;
   return Struct.evolve(state, {
     board: () => board,
     movesCount: (n) => n + 1,
@@ -117,12 +118,8 @@ export function quit(state: ClientState): ClientState {
   return Struct.evolve(state, { phase: () => "quit" as const });
 }
 
-export function setDifficulty(
-  state: ClientState,
-  difficulty: Difficulty,
-): ClientState {
-  return Struct.evolve(state, { difficulty: () => difficulty });
-}
+// Fix: Unused export — same as setBoard; no consumer imports this function.
+// Removing to maintain a tight, predictable API surface.
 
 export function setConnecting(state: ClientState): ClientState {
   return Struct.evolve(state, {

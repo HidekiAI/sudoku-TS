@@ -1,6 +1,7 @@
 import { Array, Effect } from "effect";
 import chalk from "chalk";
-import type { Board } from "@sudoku-ts/shared";
+// Fix: `Board` import was unused — Board is accessed through ClientState.board,
+// whose type flows through the ClientState interface directly.
 import type { ClientState } from "../state.js";
 import { serverUrl } from "../api/game-api.js";
 

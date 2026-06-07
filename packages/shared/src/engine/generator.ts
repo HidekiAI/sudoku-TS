@@ -25,7 +25,23 @@ function fillDiagonalBoxes(): Effect.Effect<Board> {
         ),
         (pair) => pair,
       );
-      return cells.reduce((acc, [r, c], i) => setCell(acc, r, c, nums[i]!), b);
+      // Fix: Non-null assertion bypasses noUncheckedIndexedAccess.
+      // Use Option.getOrElse with fallback 0 as CellValue for FP safety.
+      // `Array.makeBy(3, ...)` produces indices 0-2 and shuffled nums always has 9
+      // elements, so the access is in-bounds; the fallback is a type-level guarantee.
+      return cells.reduce(
+        (acc, [r, c], i) =>
+          setCell(
+            acc,
+            r,
+            c,
+            Option.getOrElse(
+              Option.fromNullable(nums[i]),
+              () => 0 as CellValue,
+            ),
+          ),
+        b,
+      );
     }, board);
   });
 }

@@ -44,9 +44,11 @@ export type ValidateMoveResponse = Schema.Schema.Type<
 export const HintResponseSchema = Schema.Struct({
   row: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
   col: Schema.Number.pipe(Schema.int(), Schema.between(0, 8)),
+  // Fix: Range was 0-8, rejecting valid cell value 9.
+  // Cell values are 0-9 per CellValueSchema; 9 is a valid placement.
   value: Schema.Number.pipe(
     Schema.int(),
-    Schema.between(0, 8),
+    Schema.between(0, 9),
   ) as Schema.Schema<CellValue, CellValue>,
   board: BoardSchema,
   solved: Schema.Boolean,

@@ -40,13 +40,18 @@ function handleKey(
         return setConnecting(state);
       });
     }
-    if (key.kind === "char" && diffMap[key.value]) {
-      return Effect.succeed(
-        showMessage(
-          state,
-          `Difficulty: ${diffMap[key.value]!}. Press Enter to start.`,
-        ),
-      );
+    // Fix: Non-null assertion on dynamic key access bypasses type safety.
+    // Use Option.fromNullable for explicit FP unwrapping.
+    if (key.kind === "char") {
+      const diff = Option.fromNullable(diffMap[key.value]);
+      if (Option.isSome(diff)) {
+        return Effect.succeed(
+          showMessage(
+            state,
+            `Difficulty: ${diff.value}. Press Enter to start.`,
+          ),
+        );
+      }
     }
     if (key.kind === "quit") return Effect.succeed(quit(state));
     return Effect.succeed(state);
