@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-push hook: run unit tests before allowing a push.
+# If tests fail, fix and `git commit --amend`, then push again.
+
+echo "=== Running unit tests before push ==="
+pnpm vitest run
+status=$?
+if [ $status -ne 0 ]; then
+  echo "=== TESTS FAILED (exit $status): push aborted ==="
+  echo "Fix the failures, then: git commit --amend && git push"
+  exit 1
+fi
+echo "=== All tests passed, proceeding with push ==="
