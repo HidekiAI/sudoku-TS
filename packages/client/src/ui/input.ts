@@ -2,7 +2,12 @@ import { Effect, Option, Queue } from "effect";
 
 const debug = () => process.env["SUDOKU_DEBUG"] !== undefined;
 function dbg(...args: unknown[]) {
-  if (debug()) process.stderr.write(`[key] ${args.map(String).join(" ")}\n`);
+  if (debug())
+    Effect.runSync(
+      Effect.sync(() =>
+        process.stderr.write(`[key] ${args.map(String).join(" ")}\n`),
+      ),
+    );
 }
 
 export type KeyEvent =

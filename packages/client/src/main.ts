@@ -1,4 +1,4 @@
-import { Effect, Console, Layer } from "effect";
+import { Effect, Console, Layer, Option } from "effect";
 import { FetchHttpClient } from "@effect/platform";
 import { GameApi, GameApiLive } from "./api/game-api.js";
 import { render } from "./ui/render.js";
@@ -30,17 +30,12 @@ function handleKey(
       return Effect.gen(function* (_) {
         const api = yield* GameApi;
         const result = yield* api.createGame(state.difficulty).pipe(
-          Effect.catchAll(() => Effect.succeed(null as unknown as never)),
-          Effect.map((r) => (r && "board" in r ? r : null)),
+          Effect.map(Option.some),
+          Effect.catchAll(() => Effect.succeed(Option.none())),
         );
-        if (result) {
-          return setGame(
-            state,
-            result.id,
-            result.difficulty,
-            result.board,
-            result.givenMask,
-          );
+        if (Option.isSome(result)) {
+          const r = result.value;
+          return setGame(state, r.id, r.difficulty, r.board, r.givenMask);
         }
         return setConnecting(state);
       });
@@ -105,17 +100,16 @@ function handleKey(
         const api = yield* GameApi;
         const { row, col } = state.cursor;
         const result = yield* api.getHint(state.gameId, row, col).pipe(
-          Effect.catchAll(() => Effect.succeed({} as never)),
-          Effect.map((r) => (r && "board" in r ? r : null)),
+          Effect.map(Option.some),
+          Effect.catchAll(() => Effect.succeed(Option.none())),
         );
-        if (result) {
-          return updateBoard(
-            state,
-            result.board,
-            result.message,
-            result.solved,
-            { row, col, isConflict: false },
-          );
+        if (Option.isSome(result)) {
+          const r = result.value;
+          return updateBoard(state, r.board, r.message, r.solved, {
+            row,
+            col,
+            isConflict: false,
+          });
         }
         return showMessage(state, "Hint failed. Is the server running?");
       });
@@ -148,16 +142,16 @@ function tryConnect(
           Effect.gen(function* (_2) {
             const api = yield* GameApi;
             const result = yield* api.createGame(state.difficulty).pipe(
-              Effect.catchAll(() => Effect.succeed(null as unknown as never)),
-              Effect.map((r) => (r && "board" in r ? r : null)),
+              Effect.map(Option.some),
+              Effect.catchAll(() => Effect.succeed(Option.none())),
             );
-            return result
+            return Option.isSome(result)
               ? setGame(
                   state,
-                  result.id,
-                  result.difficulty,
-                  result.board,
-                  result.givenMask,
+                  result.value.id,
+                  result.value.difficulty,
+                  result.value.board,
+                  result.value.givenMask,
                 )
               : state;
           }),
