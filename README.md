@@ -101,6 +101,16 @@ packages/
 
 See [docs/](docs/) for architecture, API contract, game engine details, and the full pattern catalog.
 
+## Acknowledgments
+
+This project was developed with assistance from:
+
+- **[OpenCode](https://opencode.ai)** — AI coding agent, itself built on [Effect-TS](https://effect.website/) (uses `effect` v4 in its dependency catalog). A real-world validation that Effect-TS powers production-grade tooling.
+- **OpenRouter** — Unified API gateway for LLM access.
+- **DeepSeek V4** — LLM used via both OpenCode-hosted and OpenRouter-hosted inference.
+
+The unit test suite and much of the Effect-TS pattern migration were guided through AI-assisted pairing.
+
 ## License
 
 MIT. This project and its dependency [effect](https://github.com/Effect-TS/effect) are both MIT licensed.
