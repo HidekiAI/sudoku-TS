@@ -626,7 +626,7 @@ The queue acts as a **buffer between the push-based `onData` callback and the pu
    const byte = buf[cursor] ?? 0
    ```
 
-4. **ATOMICITY: SynchronizedRef.modify over get-then-update.** The TOCTOU race between `store.get(id)` and `store.update(id, patch)` is the effect-ts equivalent of a double-checked locking bug. The fix is `store.modify(id, fn)` which performs the entire read-modify-write atomically — the callback `fn` is a pure function (no effects), so the runtime can guarantee linearizability:
+4. **ATOMICITY: SynchronizedRef.modify over get-then-update.** The Time-of-Check Time-of-Use (TOCTOU) race between `store.get(id)` and `store.update(id, patch)` is the effect-ts equivalent of a double-checked locking bug. The fix is `store.modify(id, fn)` which performs the entire read-modify-write atomically — the callback `fn` is a pure function (no effects), so the runtime can guarantee linearizability:
    ```typescript
    // ❌ Bad: Non-atomic read-modify-write (TOCTOU race)
    const session = yield* store.get(id)

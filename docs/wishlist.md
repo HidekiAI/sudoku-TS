@@ -36,3 +36,21 @@
 
 - Multiple color palettes (high-contrast, dark, colorblind-friendly)
 - Configurable via menu or config file
+
+## Effect-AI hint integration
+
+- Replace or augment the current hint mechanic (which fills the correct value) with an AI-powered suggestion system
+- When the player requests a hint, call an LLM (via Effect-AI or direct OpenAI API) to analyze the board and suggest:
+  - Which cell to focus on next (e.g. "Look at row 3, column 5 — only one candidate fits")
+  - A reasoning chain: "This cell must be 7 because row 3 already has 1,2,5, column 5 has 3,4,6, and box 2 has 8,9"
+  - Difficulty-appropriate hints (easy = direct single candidate, hard = X-wing or swordfish patterns)
+- Effect-AI provides typed, effectful LLM calls with structured output via Schema
+- Candidate integration points:
+  - `POST /api/games/:id/ai-hint` — returns `{ reasoning: string, suggestion: { row, col, value? } }`
+  - Client renders the reasoning text alongside the board
+  - Optional: rate-limit AI hints, track usage separately from regular hints
+- Infrastructure needed:
+  - `@effect/ai` package (or direct OpenAI REST client wrapped as an Effect service)
+  - `AiHintService` Tag + Layer
+  - API key config via `Config.redacted`
+  - Backend-only: no AI calls from the client TUI

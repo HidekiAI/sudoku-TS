@@ -72,7 +72,7 @@ export const makeGameService = Effect.gen(function* (_) {
       };
     });
 
-  // Fix: TOCTOU race condition — `get(id)` then `update(id)` was non-atomic.
+  // Fix: Time-of-Check Time-of-Use (TOCTOU) race condition — `get(id)` then `update(id)` was non-atomic.
   // Two concurrent requests could read the same stale session and overwrite
   // each other's changes. `store.modify` uses SynchronizedRef.modify to perform
   // the entire read-modify-write atomically, preserving referential transparency.
@@ -157,7 +157,7 @@ export const makeGameService = Effect.gen(function* (_) {
       });
     });
 
-  // Fix: Same TOCTOU race as submitMove — get+update split is non-atomic.
+  // Fix: Same TOCTOU (Time-of-Check Time-of-Use) race as submitMove — get+update split is non-atomic.
   // Also fix: Non-null assertions `solution[row]![col]!` bypass type safety.
   // Schema.decodeUnknown(HintRequestSchema) guarantees row/col are 0-8, so
   // optional chaining with ?? 0 is both safe and FP-transparent.

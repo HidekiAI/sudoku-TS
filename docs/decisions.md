@@ -107,7 +107,29 @@
 
 ---
 
-## 011 — Hints provide annotations, not answers (future)
+## 011 — OpenAPI spec from HttpApi definition, served via HttpRouter
+
+**Context:** Need API documentation. `@effect/platform` provides `OpenApi.fromApi`
+and `HttpApiBuilder.serve()` for automatic OpenAPI spec generation, but the full
+`HttpApiBuilder.serve()` layer composition has unresolved TypeScript type
+inference issues with custom service layers (GameStore, GameService).
+
+**Decision:** Define the API contract with `HttpApi`/`HttpApiGroup`/`HttpApiEndpoint`
+for type safety and spec generation, but serve routes via `HttpRouter` (the
+proven lower-level API). The OpenAPI spec is generated with `OpenApi.fromApi(api)`
+and served at `/openapi.json`. Swagger UI is served as static HTML at `/docs`.
+
+**Consequences:**
+- Type-safe route definitions (request/response shapes checked against Schema)
+- Auto-generated OpenAPI 3.1 spec without annotations
+- Swagger UI accessible at `/docs` with "Try it out" support
+- Two route definitions to maintain (HttpApi + HttpRouter) — but the HttpApi
+  is purely declarative and serves as the single source of truth for schemas
+- No dependency on `HttpApiBuilder.serve()` layer type resolution
+
+---
+
+## 012 — Hints provide annotations, not answers (future)
 
 **Context:** Current hint mechanic fills the correct value into the cell, which gives away the answer. A more instructive approach is to populate the cell's pencil-mark annotations with valid candidates.
 

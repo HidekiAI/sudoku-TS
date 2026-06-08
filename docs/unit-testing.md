@@ -149,7 +149,7 @@ These functions return `Effect<T, E, R>` where `R` includes `Random` or `Clock`.
 | `get` fails for non-existent ID | `"nonexistent"` | Effect fails with error | 404 routes depend on this |
 | `update` applies patch to all fields | `id, { board: newBoard, movesCount: 3 }` | `get(id).movesCount === 3`, `board === newBoard` | Partial update |
 | `update` is no-op for non-existent ID | `"nonexistent", { board }` | No error, no side effects | Defensive safety |
-| `modify` atomically reads and writes | `id, (s) => [s.movesCount, { ...s, movesCount: s.movesCount + 1 }] as const` | Returns `s.movesCount`, then `get(id).movesCount === s.movesCount + 1` | TOCTOU fix — returns the OLD value before increment |
+| `modify` atomically reads and writes | `id, (s) => [s.movesCount, { ...s, movesCount: s.movesCount + 1 }] as const` | Returns `s.movesCount`, then `get(id).movesCount === s.movesCount + 1` | Time-of-Check Time-of-Use (TOCTOU) fix — returns the OLD value before increment |
 | `modify` pure callback receives the session | modified callback | callback receives exact session from store | Correct scope |
 | `exists` returns true for existing game | after `create` | `true` | Route pre-checks |
 | `exists` returns false for non-existing | no game created | `false` | Route pre-checks |
@@ -175,7 +175,7 @@ These functions return `Effect<T, E, R>` where `R` includes `Random` or `Clock`.
 | `submitMove` rejects given cell | row/col where `givenMask[row][col] === true` | `response.valid === false`, `response.message === "Cannot change a given cell"` | Clue immutability |
 | `submitMove` sets solved=true when board complete | fill all cells to match solution | `response.solved === true`, `response.message === "Puzzle solved!"` | Win detection |
 | `submitMove` status is "completed" after solving | same | `store.get(id).status === "completed"` | Persisted completion |
-| `submitMove` concurrent requests don't race | 2 concurrent moves (one correct, one wrong) | Both responses are valid (no lost updates) | TOCTOU regression |
+| `submitMove` concurrent requests don't race | 2 concurrent moves (one correct, one wrong) | Both responses are valid (no lost updates) | TOCTOU (Time-of-Check Time-of-Use) regression |
 | `hint` returns correct value from solution | valid row/col | `response.value === solution[row][col]` | Hint reveals correct answer |
 | `hint` updates board in store | valid row/col | `store.get(id).board[row][col] === solution[row][col]` | Hint writes the value |
 | `hint` increments hintsUsed | valid row/col | `store.get(id).hintsUsed === session.hintsUsed + 1` | Hint counter |
@@ -270,7 +270,7 @@ These functions return `Effect<T, E, R>` where `R` includes `Random` or `Clock`.
 | Complete puzzle → status is "completed" | Fill all remaining cells correctly | Status changes to "completed" | End-to-end win flow |
 | Invalid game ID → 404 | `GET /api/games/nonexistent` | Response status 404 | Error routing |
 | Invalid move body → parse error | `POST /api/games/:id/moves` with `{}` | Response status 400 or error | Schema validation at HTTP boundary |
-| Two concurrent moves → no lost writes | 20 parallel moves, each incrementing a counter cell | Final board contains all 20 values | TOCTOU at HTTP level |
+| Two concurrent moves → no lost writes | 20 parallel moves, each incrementing a counter cell | Final board contains all 20 values | TOCTOU (Time-of-Check Time-of-Use) at HTTP level |
 | `createGame` returns correct response shape | POST with "hard" | Response matches `CreateGameResponseSchema` | Server-client contract |
 | `submitMove` response matches schema | POST valid move | Response matches `ValidateMoveResponseSchema` | Schema contract |
 | `hint` response matches schema | POST hint request | Response matches `HintResponseSchema` | Schema contract |
