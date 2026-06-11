@@ -714,3 +714,50 @@ Every `??` default (TypeScript) or `unwrap_or(default)` (Rust) is a **deliberate
 ### Every `??` in This Codebase Is Annotated
 
 Search for `// Safety:` comments preceding each `??` or `getOrElse` to find the justification. If a new `??` is added without a `// Safety:` comment, the review will flag it.
+
+## When Native JS Is More Elegant Than effect-ts
+
+effect-ts is not a wholesale replacement for JavaScript — it targets specific pain points (type-safe errors, DI, concurrency, lazy evaluation). For simple pure expressions, native JS is often terser. **Using native JS for what it's good at is a strength, not a compromise.**
+
+### Example: `hasNoConflicts`
+
+```typescript
+// effect-ts HashSet approach (hypothetical):
+import { HashSet, Array } from "effect";
+function hasNoConflicts(values: CellValue[]): boolean {
+  const filtered = values.filter((v) => v !== 0);
+  return HashSet.size(HashSet.fromIterable(filtered)) === filtered.length;
+}
+
+// Native JS — same semantics, half the tokens:
+function hasNoConflicts(values: CellValue[]): boolean {
+  const filtered = values.filter((v) => v !== 0);
+  return new Set(filtered).size === filtered.length;
+}
+```
+
+The native version is shorter and equally pure — `new Set` is constructed and discarded, no mutation escapes. There is zero benefit to replacing it with `HashSet`.
+
+### Comparison across languages
+
+Here is the same algorithm in all four languages:
+
+| Language | Expression | Notes |
+|---|---|---|
+| **JS (native)** | `new Set(filtered).size === filtered.length` | Built-in, one call |
+| **effect-ts** | `HashSet.size(HashSet.fromIterable(filtered)) === filtered.length` | Two calls, same semantics |
+| **Rust** | `set.len() == filtered.len()` | After explicit `HashSet::from_iter` |
+| **F#** | `Set.count (Set.ofArray filtered) = filtered.Length` | Closest to JS — single composeable call |
+
+### When to use native JS vs effect-ts
+
+| Use native JS | Use effect-ts |
+|---|---|
+| `Set`, `Map` for simple dedup/lookup | `HashMap` when you need persistent/immutable semantics across updates |
+| `Array.filter`/`.map`/`.find` for small known-size arrays | `Array` combinators when chaining with other effectful operations |
+| `Math.max`/`Math.min` on primitives | `Number.clamp` doesn't exist natively; effect-ts has no special offering here |
+| `Date.now()` in non-testable code | `Clock.currentTimeMillis` when you need testability or managed time |
+| `for` loop with early exit | `Array.every` / `Stream` for composable lazy iteration |
+| `JSON.parse`/`JSON.stringify` | `Schema.decodeUnknown` + `Schema.encodeSync` — validation + types |
+
+**The rule of thumb:** if the operation is a pure expression with no side effects and no need for testability/lazy evaluation/error tracking, native JS is the right tool. effect-ts exists to fill gaps native JS doesn't solve well — it doesn't replace every built-in.
