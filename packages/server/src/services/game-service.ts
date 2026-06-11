@@ -166,6 +166,8 @@ export const makeGameService = Effect.gen(function* (_) {
       const req = yield* Schema.decodeUnknown(HintRequestSchema)(raw);
       const { row, col } = req;
       return yield* store.modify(id, (session) => {
+        // Safety: row/col validated 0-8 by HintRequestSchema.decodeUnknown above.
+        // `?? 0` satisfies noUncheckedIndexedAccess; the schema guarantees bounds.
         const correctValue = session.solution[row]?.[col] ?? 0;
         const boardAfter = setCell(session.board, row, col, correctValue);
         const solved = isBoardSolved(boardAfter, session.solution);

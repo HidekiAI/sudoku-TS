@@ -15,6 +15,8 @@ import {
 
 // Fix: Module-level process.env access is a side effect at import time.
 // This is minor (no mutation), but deferring to a function improves testability.
+// Safety: ?? provides a default dev server URL — in production, deployment
+// tooling (Docker, etc.) always sets a real API_URL value.
 const BASE_URL = process.env["API_URL"] ?? "http://localhost:8000";
 export const serverUrl = () => BASE_URL;
 

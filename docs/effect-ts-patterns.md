@@ -647,3 +647,70 @@ The queue acts as a **buffer between the push-based `onData` callback and the pu
 The one place where `try/catch` is tolerated: **interop with callback-based APIs** where the boundary between Effect and imperative code makes `Effect.catchAll` impractical. In those cases:
 - The catch block **must** document why the suppression is safe (e.g., `"stdin might already be destroyed — non-fatal during cleanup"`)
 - The catch should be as narrow as possible (no `catch {}` — always name the specific error if the API supports it)
+
+## Fallback Safety — When to `??` / `unwrap_or` vs. When to Fail
+
+Every `??` default (TypeScript) or `unwrap_or(default)` (Rust) is a **deliberate architectural choice** between two options: silently degrade or loudly fail. The rule: **only self-heal when the fallback is a provable no-op**. Otherwise, propagate the error through the type system.
+
+### Three Safe Categories
+
+**1. Schema-guaranteed bounds** — Array access where the index is validated by `Schema`, caller contract, or construction pattern (e.g., `Array.makeBy(9, ...)` producing indices 0-8 into a 9-element board):
+
+```typescript
+// TypeScript — board[r]?.[col] ?? 0
+// Safety: row/col are 0-8 (Schema.between(0,8)), board is 9×9.
+// 0 is the empty-cell sentinel — a no-op in every validation check.
+```
+
+```rust
+// Rust — board.get(r).and_then(|row| row.get(col)).copied().unwrap_or(0)
+// Safety: same — r/col validated upstream, 0 is the empty sentinel.
+```
+
+**2. Type-level guarantee with no runtime cost** — Access satisfied by the type system where the index is in-bounds but `noUncheckedIndexedAccess` requires an explicit fallback:
+
+```typescript
+// TypeScript — buf[cursor] ?? 0
+// Safety: cursor < buf.length is checked on the same line (guard before access).
+// The `?? 0` satisfies noUncheckedIndexedAccess without a `!` assertion.
+```
+
+```rust
+// Rust — buf.get(cursor).copied().unwrap_or(0)
+// Safety: same guard before access. unwrap_or here is expressiveness, not
+// error masking — the bounds check already guarantees safety.
+```
+
+**3. Fallback sentinel that maps to correct failure** — Where the fallback value itself triggers the correct error handling path downstream:
+
+```typescript
+// TypeScript — params["id"] ?? ""
+// Safety: HttpRouter only dispatches this handler when `:id` is present in
+// the path. An empty string reaches store.get(id), which returns a "not found"
+// error — the correct 404 behavior.
+```
+
+```rust
+// Rust — params.get("id").map(String::as_str).unwrap_or("")
+// Safety: same — router guarantees presence; empty string produces the right
+// 404 path downstream.
+```
+
+### When NOT to Self-Heal (Fail Instead)
+
+- **Data integrity violations** — If a board row has the wrong length or a cell value is out of range, `?? 0` would mask a bug. Let `Schema.decodeUnknown` reject it with a `ParseError`.
+- **Missing required configuration** — If `API_URL` is unset in production, `?? "http://localhost:8000"` would silently connect to the wrong server. (The actual production deployment always sets `API_URL` via Docker env, so the default is purely a dev convenience — this is an acceptable exception.)
+- **Logical errors** — If a hashmap lookup fails and the key **should** exist (e.g., a game ID validated by the ID schema), use `Option.getOrThrow` / `expect` / `unwrap` in tests only, and propagate via `Option` / `Either` in production.
+
+### Rust Equivalents
+
+| TypeScript | Rust | When |
+|---|---|---|
+| `arr[i] ?? 0` | `arr.get(i).copied().unwrap_or(0)` | Safe fallback — sentinel is a no-op |
+| `obj[key] ?? ""` | `obj.get(key).map(String::as_str).unwrap_or("")` | Safe fallback — triggers no-op or correct error |
+| `Schema.decodeUnknown(...)` | `serde_json::from_str::<T>(...)?` | Fallible — propagate error |
+| `store.keys[id] ?? fail` | `store.keys.get(id).ok_or(Error::NotFound)?` | Required key missing — **fail** |
+
+### Every `??` in This Codebase Is Annotated
+
+Search for `// Safety:` comments preceding each `??` or `getOrElse` to find the justification. If a new `??` is added without a `// Safety:` comment, the review will flag it.

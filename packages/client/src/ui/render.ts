@@ -99,6 +99,10 @@ function renderBoardGrid(state: ClientState): string[] {
       const rowLine = `  ${VV}${Array.makeBy(3, (g) =>
         Array.makeBy(3, (c) => {
           const col = g * 3 + c;
+          // Safety: r/col iterate 0-8 (makeBy(9) × makeBy(3) × g*3+c). Board,
+          // givenMask, and conflicts are all schema-validated 9×9 arrays.
+          // Fallback defaults: 0 = empty cell, false = no conflict, both no-ops
+          // in rendering.
           const value = state.board[r]?.[col] ?? 0;
           const isGiven = state.givenMask[r]?.[col] ?? false;
           const isCursor = state.cursor.row === r && state.cursor.col === col;

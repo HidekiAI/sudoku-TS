@@ -17,6 +17,9 @@ const createGameHandler = Effect.gen(function* (_) {
 
 const getGameHandler = Effect.gen(function* (_) {
   const params = yield* HttpRouter.params;
+  // Safety: HttpRouter only dispatches to this handler when :id is present in
+  // the path. `?? ""` satisfies noUncheckedIndexedAccess; an empty string id
+  // produces a "Game not found" error from store.get — the correct 404 path.
   const id = params["id"] ?? "";
   const gameService = yield* GameService;
   const result = yield* gameService.getGame(id);
@@ -25,6 +28,7 @@ const getGameHandler = Effect.gen(function* (_) {
 
 const hintHandler = Effect.gen(function* (_) {
   const params = yield* HttpRouter.params;
+  // Safety: same as getGame — HttpRouter ensures :id is present at match time.
   const id = params["id"] ?? "";
   const request = yield* HttpServerRequest.HttpServerRequest;
   const body = yield* request.json;
@@ -35,6 +39,7 @@ const hintHandler = Effect.gen(function* (_) {
 
 const submitMoveHandler = Effect.gen(function* (_) {
   const params = yield* HttpRouter.params;
+  // Safety: same as getGame — HttpRouter ensures :id is present at match time.
   const id = params["id"] ?? "";
   const request = yield* HttpServerRequest.HttpServerRequest;
   const body = yield* request.json;

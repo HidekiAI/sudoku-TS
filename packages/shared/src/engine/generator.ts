@@ -5,6 +5,14 @@ import { findEmpty, isSafe, hasUniqueSolution } from "./solver.js";
 
 const NUMBERS: CellValue[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+// Rust: fn fill_diagonal_boxes<R: Rng>(rng: &mut R) -> Board
+//      — takes &mut Rng, returns Board. Pure modulo RNG seed (same seed → same board).
+//      Shuffle is in-place on a mutable copy. No effect system needed.
+// F#:  let fillDiagonalBoxes () = effect { ... }
+//      — computation expression with Random.shuffle (requires async context).
+//      F# lacks a built-in effect system; this would typically use async or a custom
+//      monad transformer. The TS version uses Effect<Board> to keep shuffling pure and
+//      testable (seedable RNG via Random.make(seed) + Effect.withRandom).
 function fillDiagonalBoxes(): Effect.Effect<Board> {
   return Effect.gen(function* (_) {
     const board: Board = Array.makeBy(9, () =>
@@ -46,6 +54,16 @@ function fillDiagonalBoxes(): Effect.Effect<Board> {
   });
 }
 
+// Rust: fn fill_remaining_cells<R: Rng>(board: Board, rng: &mut R) -> Option<Board>
+//      — recursive with &mut Rng, returns Option<Board>. The recursive calls propagate
+//      the same rng reference; mutation is scoped to the function tree.
+// F#:  let rec fillRemainingCells board = effect {
+//        match findEmpty board with
+//        | None -> return Some board
+//        | Some (r, c) -> ...
+//      }
+//      — F# computation expression with recursive effect calls. Type system tracks
+//      the effect context but requires explicit return/let! for each effectful step.
 function fillRemainingCells(board: Board): Effect.Effect<Option.Option<Board>> {
   return Effect.gen(function* (_) {
     const empty = findEmpty(board);
@@ -63,6 +81,17 @@ function fillRemainingCells(board: Board): Effect.Effect<Option.Option<Board>> {
   });
 }
 
+// Rust: fn generate<R: Rng>(difficulty: Difficulty, rng: &mut R) -> (Board, Board)
+//      — plain function, no effect system. Rng is threaded explicitly.
+//      The caller controls determinism by seeding rng before the call.
+// F#:  let generate difficulty = effect {
+//        let! partial = fillDiagonalBoxes ()
+//        let! solution = fillRemainingCells partial
+//        ...
+//      }
+//      — F# computation expression with let! for each effectful step.
+//      The TS/effect-ts version uses Effect.gen which is syntactically identical
+//      to F#'s effect { ... } — both are monadic comprehension syntax.
 export function generate(
   difficulty: Difficulty,
 ): Effect.Effect<{ puzzle: Board; solution: Board }> {
@@ -88,6 +117,16 @@ export function generate(
   });
 }
 
+// Rust: loop { let cand = generate(difficulty, &mut rng);
+//        if has_unique_solution(cand.puzzle) { return cand; } }
+//      — loop + conditional break (no recursion overhead).
+// F#:  let rec loop () = effect {
+//        let! candidate = generate difficulty
+//        if hasUniqueSolution candidate.puzzle then return candidate
+//        else return! loop ()
+//      }
+//      — tail-recursive effect (F# optimizes tail calls, so no stack growth).
+//      The TS version is also tail-recursive (return yield* generateWithUniqueSolution).
 export function generateWithUniqueSolution(
   difficulty: Difficulty,
 ): Effect.Effect<{ puzzle: Board; solution: Board }> {
@@ -100,6 +139,10 @@ export function generateWithUniqueSolution(
   });
 }
 
+// Rust: puzzle.iter().map(|row| row.iter().map(|&c| c != 0).collect()).collect()
+//      — nested Iterator::map, collect into Vec<Vec<bool>>.
+// F#:  puzzle |> Array.map (Array.map ((<>) 0))
+//      — Array.map of partial application ((<>) 0), no intermediate collect needed.
 export function buildGivenMask(puzzle: Board): boolean[][] {
   return puzzle.map((row) => row.map((cell) => cell !== 0));
 }
