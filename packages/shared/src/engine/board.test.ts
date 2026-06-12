@@ -205,22 +205,24 @@ describe("findConflicts", () => {
   // Note: findConflicts uses appearsOnce with `<= 1` semantics, which means
   // simple duplicate pairs are not detected (clearing one cell leaves the other).
   // Use a case with 3+ duplicates to trigger detection.
+
   it("returns empty for valid board", () => {
     expect(findConflicts(board)).toEqual([]);
   });
+
   it("returns empty for full valid board", () => {
     expect(findConflicts(fullBoard)).toEqual([]);
   });
+
   it("detects triplicate in box", () => {
     const bad = board.map((r) => [...r]) as Board;
     bad[0][0] = 5 as CellValue;
-    bad[0][1] = 5 as CellValue; // duplicate
-    bad[1][1] = 5 as CellValue; // triplicate — three 5s in box(0,0)
+    bad[0][1] = 5 as CellValue;
+    bad[1][1] = 5 as CellValue; // three 5s in box(0,0)
     const conflicts = findConflicts(bad);
-    // After clearing any of the three, the remaining two still appear twice,
-    // so appearsOnce returns false for each.
     expect(conflicts.length).toBeGreaterThanOrEqual(3);
   });
+
   it("detects triplicate in row", () => {
     const bad = board.map((r) => [...r]) as Board;
     bad[0][0] = 5 as CellValue;
@@ -228,5 +230,67 @@ describe("findConflicts", () => {
     bad[0][2] = 5 as CellValue; // three 5s in row 0
     const conflicts = findConflicts(bad);
     expect(conflicts.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("detects triplicate in column", () => {
+    const bad = board.map((r) => [...r]) as Board;
+    bad[0][0] = 5 as CellValue;
+    bad[1][0] = 5 as CellValue;
+    bad[2][0] = 5 as CellValue; // three 5s in col 0
+    const conflicts = findConflicts(bad);
+    expect(conflicts.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("flags only the conflicting cell, not the whole row", () => {
+    const bad = board.map((r) => [...r]) as Board;
+    bad[0][0] = 5 as CellValue;
+    bad[0][1] = 5 as CellValue;
+    bad[0][2] = 5 as CellValue; // three 5s in row 0
+    bad[1][0] = 1 as CellValue; // valid cell
+    const conflicts = findConflicts(bad);
+    // Only cells [0,0], [0,1], [0,2] should be reported
+    const conflictSet = new Set(conflicts.map(([r, c]) => `${r},${c}`));
+    expect(conflictSet.has("0,0")).toBe(true);
+    expect(conflictSet.has("0,1")).toBe(true);
+    expect(conflictSet.has("0,2")).toBe(true);
+    expect(conflictSet.has("1,0")).toBe(false);
+  });
+
+  it("does NOT detect simple duplicate pair (known limitation)", () => {
+    const bad = board.map((r) => [...r]) as Board;
+    bad[0][0] = 5 as CellValue;
+    bad[0][1] = 5 as CellValue; // exactly two 5s in row 0
+    const conflicts = findConflicts(bad);
+    // Clearing one 5 leaves the other → appearsOnce returns true → no conflict
+    expect(conflicts.length).toBe(0);
+  });
+
+  it("does NOT detect duplicate pair in box (known limitation)", () => {
+    const bad = board.map((r) => [...r]) as Board;
+    bad[0][0] = 5 as CellValue;
+    bad[1][1] = 5 as CellValue; // exactly two 5s in box(0,0)
+    const conflicts = findConflicts(bad);
+    expect(conflicts.length).toBe(0);
+  });
+
+  it("detects triplicate across row and column simultaneously", () => {
+    const bad = board.map((r) => [...r]) as Board;
+    bad[0][0] = 5 as CellValue;
+    bad[0][1] = 5 as CellValue;
+    bad[0][2] = 5 as CellValue; // three in row 0
+    bad[1][0] = 5 as CellValue; // also three in col 0 + extra
+    const conflicts = findConflicts(bad);
+    // [0,0], [0,1], [0,2] (row), [1,0] (col)
+    expect(conflicts.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("does not mutate the original board", () => {
+    const original = board.map((r) => [...r]) as Board;
+    original[0][0] = 5 as CellValue;
+    original[0][1] = 5 as CellValue;
+    original[0][2] = 5 as CellValue;
+    const snapshot = original.map((r) => [...r]) as Board;
+    findConflicts(original);
+    expect(original).toEqual(snapshot);
   });
 });
