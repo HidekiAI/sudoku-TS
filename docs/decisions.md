@@ -142,3 +142,121 @@ and served at `/openapi.json`. Swagger UI is served as static HTML at `/docs`.
 - Input mode toggle needed: "place value" vs "toggle annotation"
 - Annotations must be stored server-side for persistence (or reconstructed from board state)
 - Hint endpoint returns `{ row, col, candidates: CellValue[] }` instead of `{ value: CellValue }`
+
+---
+
+## 013 — SubscriptionRef over recursive Effect.gen for web client
+
+**Context:** The web client needs a reactive game loop. The TUI's recursive
+`Effect.gen` + `Queue.take` pattern blocks a single fiber on keyboard input,
+which is acceptable in the terminal but doesn't map well to the browser's
+event-driven model. Multiple concurrent concerns (keyboard input, server
+polling, SSE subscription, rendering) must coexist.
+
+**Decision:** Use `SubscriptionRef<ClientState>` as the central state atom
+with a multi-fiber topology. Each concern gets its own fiber that reads and
+writes to the shared `SubscriptionRef`. The render fiber subscribes to
+`SubscriptionRef.changes` as a `Stream` and applies DOM diffs reactively.
+
+**Alternatives considered:**
+- **Single Effect.gen loop with polling** — would work but mixes concerns
+  (connecting retry, SSE subscription, rendering) into one fiber, making
+  cancellation and HMR tricky.
+- **Redux-style single store** — Effect provides no native Redux; a custom
+  implementation would reinvent `SubscriptionRef`.
+- **Solid.js / Svelte reactivity** — external framework would break the
+  pure-Effect constraint.
+
+**Consequences:**
+- Render runs independently — `Queue.take` never blocks DOM updates.
+- Controller mode (SSE subscription) slots in as a new fiber without
+  restructuring the loop.
+- Fibers are cancellable → clean HMR support via `Fiber.interrupt`.
+- Slightly more complex setup than the recursive TUI loop.
+
+---
+
+## 014 — Client-core extraction (shared client library)
+
+**Context:** Adding a web client revealed that `state.ts`, `api/game-api.ts`,
+`KeyEvent`, and `handleKey` were duplicated across client packages. The TUI
+and web clients share 100% of game logic and only differ in I/O (render +
+input).
+
+**Decision:** Extract shared client code into `@sudoku-ts/client-core`:
+- `state.ts` — `ClientState` type + pure transitions
+- `input-types.ts` — `KeyEvent` discriminated union
+- `handle-key.ts` — state machine (menu → playing → completed → controller → spectating)
+- `api.ts` — `GameApi` Tag + service implementation with `HttpClient`
+
+Both `@sudoku-ts/client` (TUI) and `@sudoku-ts/web-client` (browser) depend on
+`@sudoku-ts/client-core`.
+
+**Consequences:**
+- Single source of truth for all client game logic.
+- Tests for `state.ts`, `handle-key.ts`, and `api.ts` live in `client-core`
+  — run once, benefit both clients.
+- `client-core` has zero I/O dependencies (no `chalk`, no DOM types, no
+  `@effect/platform-node`).
+- TUI client shrinks by ~100 lines (removed duplicated state/api/handleKey).
+
+---
+
+## 015 — Three-package client structure
+
+**Context:** Client code organization — keep TUI alive alongside web, or
+replace it entirely.
+
+**Decision:** Keep both. Three packages with a clear dependency chain:
+
+```
+  @sudoku-ts/shared
+        ↑
+  @sudoku-ts/client-core
+       ↕        ↑
+  @sudoku-ts/client    @sudoku-ts/web-client
+  (chalk, stdin)       (Vite, DOM, keydown)
+```
+
+- `client/` remains the reference TUI implementation
+- `web-client/` is the new browser implementation
+- `client-core/` is the shared library both import
+
+**Consequences:**
+- TUI is preserved as a development tool and fallback (works over SSH, no
+  browser needed).
+- Web client demonstrates the same Effect patterns in a browser context.
+- `pnpm -r build` compiles all packages; `pnpm -r test` runs all tests.
+- Version bump 0.1.0 → 0.2.0 reflects the addition of `client-core` and
+  `web-client` packages.
+
+---
+
+## 016 — Hub-based event broadcasting for controller management
+
+**Context:** The controller (spectator) feature needs to broadcast game
+mutations (moves, hints, completion) to multiple subscribers in real time.
+Polling introduces latency and wasted bandwidth. The TUI client can poll, but
+the web client should receive instant updates.
+
+**Decision:** Server uses `Hub.unbounded<GameEvent>()` from Effect as a
+pub/sub channel. `GameService` publishes a `GameEvent` after every atomic
+`store.modify`. SSE endpoints (`GET /api/games/stream`, `GET
+/api/games/:id/stream`) bridge the Hub to HTTP via `Hub.subscribe` → `Stream`
+→ `HttpResponse.stream`. The web client consumes SSE via native `EventSource`
+wrapped as `Stream.async`. The TUI client polls `GET /api/games/:id` every 2s
+for simplicity (no `EventSource` in Node.js without a polyfill).
+
+**Alternatives considered:**
+- **WebSocket** — bidirectional, heavier setup; controller mode is read-only
+  so SSE is sufficient.
+- **Polling-only** — simple but adds 2s latency for web client.
+- **Long polling** — more complex than SSE with no benefit.
+
+**Consequences:**
+- Web client gets sub-second board updates during spectating.
+- TUI client uses polling (simpler, adequate for terminal latency tolerance).
+- `GameEventHub` is a new server Layer (`game-event-hub.ts`).
+- `GameService` gains a dependency on `GameEventHub` — requires Layer
+  composition update in `main.ts`.
+- `GameStore` gains a `listActive()` method for `GET /api/games`.

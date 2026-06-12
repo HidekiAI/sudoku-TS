@@ -1,6 +1,45 @@
 # Wishlist
 
 > Future feature ideas. Not planned, not committed — just tracked so they don't get forgotten.
+>
+> Items marked with ✅ are documented and planned — see referenced docs.
+
+## Web client (✅ planned — see docs/web-client-architecture.md)
+
+- [x] Documentation complete — see `docs/web-client-architecture.md`
+- [ ] Package scaffold: `packages/web-client/` + Vite config
+- [ ] DOM rendering: board grid, cursor, conflicts
+- [ ] Browser input: keydown → Queue<KeyEvent>
+- [ ] SubscriptionRef fiber topology
+- [ ] Connecting retry fiber
+
+## Client-core extraction (✅ planned — see docs/client-core.md)
+
+- [x] Documentation complete — see `docs/client-core.md`
+- [ ] `packages/client-core/` package scaffold
+- [ ] Extract `state.ts`, `input-types.ts`, `handle-key.ts`, `api.ts`
+- [ ] Update `packages/client/` to import from `@sudoku-ts/client-core`
+- [ ] Version bump 0.1.0 → 0.2.0
+
+## Controller management (✅ planned — see docs/controller-management.md)
+
+- [x] Documentation complete — see `docs/controller-management.md`
+- [ ] Server: GameEventHub + Hub integration + SSE endpoints
+- [ ] Shared: GameEvent schemas
+- [ ] client-core: controller/spectating phases in handleKey
+- [ ] TUI client: controller mode (polling game list + spectate)
+- [ ] Web client: controller mode (SSE game list + real-time spectate)
+
+## WASM/Electron client (✅ planned — see docs/wasm-client-design.md)
+
+- [x] Documentation complete — see `docs/wasm-client-design.md`
+- [ ] Rust crate: port game engine (board, solver, generator) from TS to Rust
+- [ ] `wasm-pack` compilation target
+- [ ] TypeScript WASM bridge (`bridge.ts`)
+- [ ] Svelte UI: Board, Cell, StatusBar components
+- [ ] Electron shell: main process, preload, packaging
+- [ ] Full offline play (no server needed for gameplay)
+- [ ] Cross-play compatible with server-heavy clients (same game format)
 
 ## Annotations (pencil marks)
 

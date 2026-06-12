@@ -69,7 +69,18 @@ runtime that requires a JavaScript host, just as F# requires .NET Core:
 **Missing (wishlist)**:
 - Database driver (postgres, sqlite) as an Effect Layer
 - AI/LLM integration (Effect-AI)
-- Mobile or web client
+
+**Added**:
+- Web client (`packages/web-client/`) — see `docs/web-client-architecture.md`
+- Client core (`packages/client-core/`) — shared client library — see `docs/client-core.md`
+- Controller management (`Hub<GameEvent>`, SSE) — see `docs/controller-management.md`
+
+**Planned (future)**:
+- WASM/Electron client (`packages/wasm-client/`) — see `docs/wasm-client-design.md`
+  - Game engine compiled to WASM via Rust → `wasm-pack`
+  - Server becomes thin data layer
+  - Desktop Electron shell with Svelte UI
+  - Full offline play capability
 
 ## Directory Structure
 
@@ -95,7 +106,8 @@ sudoku-ts/
 │   │   │   ├── schemas/
 │   │   │   │   ├── game.ts              # CellValue, Board, Coord, Difficulty, GameStatus
 │   │   │   │   ├── request.ts           # CreateGameRequest, SubmitMoveRequest
-│   │   │   │   └── response.ts          # CreateGameResponse, GameStateResponse, ValidateMoveResponse
+│   │   │   │   ├── response.ts          # CreateGameResponse, GameStateResponse, ValidateMoveResponse
+│   │   │   │   └── game-event.ts        # GameEvent tagged union for controller SSE
 │   │   │   ├── engine/
 │   │   │   │   ├── board.ts             # Pure board operations (getRow, getCol, setCell, etc.)
 │   │   │   │   ├── solver.ts            # Backtracking solver
@@ -105,30 +117,64 @@ sudoku-ts/
 │   │   ├── src/
 │   │   │   ├── services/
 │   │   │   │   ├── game-store.ts        # GameStore Tag + Layer (Ref<SynchronizedRef<HashMap>>)
-│   │   │   │   └── game-service.ts      # GameService Tag + Layer (business logic)
+│   │   │   │   ├── game-service.ts      # GameService Tag + Layer (business logic)
+│   │   │   │   └── game-event-hub.ts    # GameEventHub Tag + Hub<GameEvent> for SSE
 │   │   │   ├── routes/
-│   │   │   │   ├── game-routes.ts       # HttpRouter: 4 game + 2 doc endpoints
+│   │   │   │   ├── game-routes.ts       # HttpRouter: 4 game + 2 doc + 3 controller endpoints
 │   │   │   │   └── game-api.ts          # HttpApi definition → OpenAPI 3.1 spec
 │   │   │   └── main.ts                  # Server bootstrap (Layer composition)
-│   └── client/                          # raw terminal + chalk TUI
+│   ├── client-core/                     # Shared client library (NEW)
+│   │   └── src/
+│   │       ├── state.ts                 # ClientState + pure transitions
+│   │       ├── input-types.ts           # KeyEvent discriminated union
+│   │       ├── handle-key.ts            # Pure state machine (menu/playing/completed/controller/spectating)
+│   │       └── api.ts                   # GameApi Tag + service (HttpClient wrapper)
+│   ├── client/                          # raw terminal + chalk TUI (thinned)
+│   │   ├── src/
+│   │   │   ├── ui/
+│   │   │   │   ├── render.ts            # board → ANSI string with chalk
+│   │   │   │   └── input.ts             # raw stdin keypress parser
+│   │   │   └── main.ts                  # Effect.iterate game loop + controller mode
+│   └── web-client/                      # Browser client (NEW)
+│       ├── index.html                   # Vite entry
+│       ├── vite.config.ts
+│       └── src/
+│           ├── main.ts                  # SubscriptionRef + fiber topology
+│           ├── dom/
+│           │   ├── render.ts            # DOM patching from SubscriptionRef
+│           │   ├── board-view.ts        # Board → DocumentFragment
+│           │   └── input.ts             # keydown → Queue<KeyEvent>
+│           ├── controller/
+│           │   ├── sse-client.ts        # EventSource → Stream<GameEvent>
+│           │   └── controller-view.ts   # Game list + spectate DOM
+│           └── styles.css
+│   └── wasm-client/                      # WASM/Electron client (PLANNED)
+│       ├── wasm/                         # Rust crate → wasm-pack
+│       │   ├── Cargo.toml
+│       │   └── src/lib.rs               # sudoku-engine WASM exports
 │       ├── src/
-│       │   ├── api/
-│       │   │   └── game-api.ts          # HttpClient wrapper as Service
-│       │   ├── ui/
-│       │   │   ├── render.ts            # board → ANSI string with chalk
-│       │   │   └── input.ts             # raw stdin keypress parser
-│       │   ├── state.ts                 # ClientState type + pure update
-│       │   └── main.ts                  # Effect.iterate game loop
+│       │   ├── App.svelte               # Root Svelte component
+│       │   ├── lib/wasm/bridge.ts       # TS ↔ WASM FFI
+│       │   ├── routes/                  # Play, Spectate, Menu views
+│       │   └── components/              # Board, Cell, StatusBar
+│       ├── electron/                    # Electron shell
+│       │   ├── main.js
+│       │   ├── preload.js
+│       │   └── electron-builder.yml
+│       ├── vite.config.ts
+│       └── svelte.config.js
 ```
 
 ## Data Flow
+
+### Player Flow
 
 ```
 ┌──────────┐     POST /api/games         ┌──────────┐
 │          │     { difficulty }           │          │
 │  Client  │ ──────────────────────────>  │  Server  │
-│  (TUI)   │                              │  (TS)    │
-│          │ <──────────────────────────  │          │
+│  (TUI /  │                              │  (TS)    │
+│   Web)   │ <──────────────────────────  │          │
 │          │     201 { id, board, ... }   │          │
 │          │                              │          │
 │          │     POST /api/games/:id/moves│          │
@@ -138,11 +184,39 @@ sudoku-ts/
 │          │     200 { valid, solved, ..} │          │
 │          │                              │          │
 │    effect-ts powers:                    │   effect-ts powers:
-│    • Queue (raw stdin → events)        │   • Schema validation
+│    • Queue (keyboard → events)         │   • Schema validation
 │    • HttpClient                         │   • Layer DI (Tag + Layer)
-│    • Recursive game loop (Effect.gen)  │   • SynchronizedRef<HashMap>
+│    • Effect.gen / SubscriptionRef       │   • SynchronizedRef<HashMap>
 │    • Option/Either for errors           │   • Effect.gen business logic
-│    • makeReadKey (one-shot setup)       │   • Clock for elapsed time
+│    • ClientState (pure transitions)     │   • Clock for elapsed time
+└──────────┘                              └──────────┘
+```
+
+### Controller (Spectator) Flow
+
+```
+┌──────────┐     GET /api/games           ┌──────────┐
+│          │ ──────────────────────────>  │          │
+│          │ <──────────────────────────  │          │
+│          │     [{ id, difficulty, ... }]│          │
+│          │                              │          │
+│  Client  │     GET /api/games/:id       │  Server  │
+│  (ctrl)  │ ──────────────────────────>  │  (TS)    │
+│          │ <──────────────────────────  │          │
+│          │     { board, status, ... }   │          │
+│          │                              │          │
+│          │     GET /api/games/stream    │  Hub<GameEvent>
+│          │ ──────────────────────────>  │    ↑      │
+│          │ <═════ SSE (text/event-stream) ═══╝      │
+│          │     { _tag: "MoveMade", ... }│          │
+│          │     { _tag: "GameCompleted"} │          │
+│          │                              │          │
+│    Shared client-core powers:           │   New powers:
+│    • ClientState.mode: "controller"     │   • GameEventHub Tag + Hub
+│    • gameList + controllerCursor        │   • Hub.publish on every mutation
+│    • handleKey (controller/spectating)  │   • SSE stream from Hub.subscribe
+│    • GameApi.listGames()                │   • GameStore.listActive()
+│    • GameApi.streamGameEvents()         │   • Per-game filtered SSE
 └──────────┘                              └──────────┘
 ```
 
@@ -159,24 +233,37 @@ sudoku-ts/
   game-routes.ts
     │
     ├── 4 game routes (POST/GET /api/games*, POST .../moves, .../hints)
-    ├── GET /openapi.json                 ← serves the auto-generated spec
-    └── GET /docs                          ← Swagger UI HTML (loaded from CDN)
+    ├── 3 controller routes:
+    │     GET /api/games                ← list active games
+    │     GET /api/games/stream         ← SSE: all game events
+    │     GET /api/games/:id/stream     ← SSE: single game events
+    ├── GET /openapi.json               ← serves the auto-generated spec
+    └── GET /docs                       ← Swagger UI HTML (loaded from CDN)
+
+  game-event-hub.ts
+    │
+    └── Hub.unbounded<GameEvent>        ← pub/sub channel for game mutations
+          │
+          ├── GameService.publish()     ← called after each store.modify
+          └── SSE routes subscribe()    ← Hub.subscribe → Stream → HTTP stream
 
   main.ts
     │
     ├── parseArg / applyCliArgs           ← CLI port/host overrides (pure Effect)
-    ├── makeGameStore                      ← SynchronizedRef<HashMap>
-    ├── makeGameService                   ← business logic
+    ├── makeGameEventHub                  ← Hub.unbounded<GameEvent>
+    ├── makeGameStore                     ← SynchronizedRef<HashMap>
+    ├── makeGameService                   ← business logic + hub injection
     └── NodeHttpServer.make.serve(router, corsWithLogging)
           │
           ├── Effect.provideService(GameStore)
           ├── Effect.provideService(GameService)
+          ├── Effect.provideService(GameEventHub)
           └── Effect.fork → Effect.never
 ```
 
-## Client Loop
+## Client Architecture (Two Variants)
 
-The game loop is a recursive function — `readKey` is created once by `makeReadKey()` and passed as an explicit parameter through every iteration:
+### TUI Client Loop (Recursive Effect.gen)
 
 ```
 makeReadKey()
@@ -185,10 +272,45 @@ makeReadKey()
 
 gameLoop(state, readKey):
   if state.phase == "quit" → return state                // base case
-  render(state)                                          // pure string → console.log
+  if state.phase == "connecting"
+    → tryConnect(state, readKey)                         // race: keypress vs retry
+  render(state)                                          // chalk → console.log
   key = yield* readKey                                   // Queue.take(keyEvents)
-  newState = handleKey(state, key)                       // pure transition
+  newState = yield* handleKey(state, key)                // Effect (may call API)
   gameLoop(newState, readKey)                            // tail recurse
+```
+
+Controller mode: menu key `c` enters `"controller"` phase — same recursive
+loop but `handleKey` dispatches to controller/spectating branches. A polling
+fiber refreshes the game list every 2s via `Effect.repeat`.
+
+### Web Client Loop (SubscriptionRef + Fibers)
+
+```
+stateRef = SubscriptionRef.make(initialState)
+
+Fiber A (keyboard):
+  Queue.unbounded<KeyEvent> ←── keydown handler
+  loop:
+    key = Queue.take
+    current = stateRef.get
+    newState = yield* handleKey(current, key)  // same handleKey from client-core
+    stateRef.set(newState)
+
+Fiber B (render):
+  SubscriptionRef.changes(stateRef) → Stream<ClientState>
+  Stream.runForEach(render)         → DOM patches
+
+Fiber C (connecting retry):
+  watches stateRef.phase === "connecting"
+  Effect.repeat(Effect.sleep(2000) + api.createGame(...))
+  stateRef.set(setGame(...)) on success
+
+Controller mode:
+  Fiber D: SSE subscription (EventSource → Stream<GameEvent>)
+    → updates game list in place
+  Fiber E: spectate polling/filtered SSE
+    → live board updates for selected game
 ```
 
 ## OpenAPI / Swagger Support
@@ -222,7 +344,10 @@ and derives the OpenAPI spec from the `HttpApi` definition separately.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | /api/games | Create a new game |
+| GET | /api/games | List all active games (controller) |
 | GET | /api/games/:id | Get game state |
+| GET | /api/games/:id/stream | SSE stream for one game (controller) |
+| GET | /api/games/stream | SSE stream of all game events (controller) |
 | POST | /api/games/:id/moves | Submit a move |
 | POST | /api/games/:id/hints | Request a hint |
 | GET | /openapi.json | Raw OpenAPI spec |
