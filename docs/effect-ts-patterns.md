@@ -490,6 +490,112 @@ export function solve(board: Board): Option.Option<Board> {
 }
 ```
 
+### Option as Sequence — treat `None` as empty, `Some` as one element
+
+In F# and Rust, an `Option` can be used directly wherever a sequence is expected — `None` contributes 0 elements, `Some(x)` contributes 1. This makes composition with flat-map/filter-map extremely concise:
+
+#### F# — `option` in sequence expressions
+
+F# special-cases `option<'T>` inside `seq {}` / list expressions — `yield!` on an option emits 0 or 1 elements:
+
+```fsharp
+// Each yield! emits 0 or 1 values — collectively behaves like flat_map
+let result = seq {
+    yield! Some 42           // emits 42
+    yield! None              // emits nothing
+    yield! Some 7            // emits 7
+}
+// → seq [ 42; 7 ]
+
+// Choose = filterMap on options
+let evens = [1..5] |> List.choose (fun n ->
+    if n % 2 = 0 then Some (n * 10) else None
+)
+// → [ 20; 40 ]
+```
+
+#### Rust — `Option` implements `IntoIterator`
+
+Rust's `Option<T>` implements `IntoIterator`, so it works in `for`, `flatten()`, `filter_map()`, and any iterator combinator:
+
+```rust
+// flatten() on Iterator<Item = Option<T>> = 0..1 elements per item
+let result: Vec<i32> = [Some(1), None, Some(3)]
+    .into_iter()
+    .flatten()   // Some emits 1, None emits 0
+    .collect();
+// → vec![1, 3]
+
+// filter_map = map + keep Somes
+let evens: Vec<i32> = (1..=5)
+    .filter_map(|n| if n % 2 == 0 { Some(n * 10) } else { None })
+    .collect();
+// → vec![20, 40]
+```
+
+#### Effect-TS — explicit via `Array.filterMap` / `Array.getSomes` / `Option.toArray`
+
+Effect-TS's `Option<T>` does **not** implement `Iterable<T>` (no `[Symbol.iterator]`). Instead, the same patterns use explicit combinators from the `Array` and `Option` modules:
+
+```typescript
+import { Array, Option, pipe } from "effect";
+
+// Option.toArray — Some → [v], None → []  (F# yield! / Rust flatten on single)
+Option.toArray(Option.some(42))   // → [42]
+Option.toArray(Option.none())     // → []
+
+// Iterate over an Option as a 0-or-1-element container:
+for (const x of Option.toArray(myOption)) {
+  // runs 0 or 1 times
+}
+
+// Array.getSomes — filter out Nones  (Rust flatten, F# choose with identity)
+const options = [Option.some(1), Option.none(), Option.some(3)];
+pipe(options, Array.getSomes)   // → [1, 3]
+
+// Array.filterMap — map + keep Somes in one pass  (Rust filter_map, F# choose)
+// This is the actual equivalent of Rust's filter_map:
+const evens = pipe(
+  [1, 2, 3, 4, 5],
+  Array.filterMap((n) => n % 2 === 0 ? Option.some(n * 10) : Option.none()),
+); // → [20, 40]
+
+// In the solver, findEmpty uses Array.filterMap with flatMap
+// to find the first empty cell (like Rust's flat_map + find):
+export function findEmpty(board: Board): Option.Option<[number, number]> {
+  // Rust: (0..9).flat_map(|r| (0..9).map(move |c| (r, c)))
+  //        .find(|&(r, c)| board[r][c] == 0)
+  return Array.head(
+    Array.filterMap(
+      Array.flatMap(
+        Array.makeBy(9, (r) =>
+          Array.makeBy(9, (c) => [r, c] as [number, number]),
+        ),
+        (pair) => pair,
+      ),
+      ([r, c]) =>
+        board[r]?.[c] === 0
+          ? Option.some([r, c] as [number, number])
+          : Option.none(),
+    ),
+  );
+}
+```
+
+#### Summary table
+
+| Pattern | F# | Rust | Effect-TS |
+|---|---|---|---|
+| Option → 0..1 elements | `yield! someOpt` | `option.flatten()` (single) | `Option.toArray(someOpt)` |
+| Filter-map over iterable | `Seq.choose fn xs` | `xs.iter().filter_map(fn)` | `Array.filterMap(xs, fn)` |
+| Keep only Somes | `Seq.choose id xs` | `xs.iter().flatten()` | `Array.getSomes(xs)` |
+| For-loop over option | `for x in someOpt do ...` | `for x in someOpt { ... }` | `for (const x of Option.toArray(someOpt)) { ... }` |
+| Short-circuit on None | `Option.defaultValue` / `match` | `?` operator | `Option.getOrThrow` / `yield*` (in Effect.gen) |
+
+#### Key difference
+
+F# and Rust give `Option` **first-class sequence status** — the type is iterable by default, so it plugs directly into `for`, `yield!`, `flatten()`, `filter_map()`, etc. Effect-TS keeps `Option` as a standalone type with its own combinators and requires an explicit conversion (`Option.toArray`) or uses `Array.filterMap`/`Array.getSomes` for the collection-level pattern. Same power, identical semantics, more explicit — no hidden magic, no risk of accidentally iterating an `Option` when you meant to match on it.
+
 ## Either — Typed Success-or-Failure (`packages/shared/src/schemas/response.test.ts`)
 
 `Either<L, R>` is the direct analogue of Rust's `Result<T, E>` — a pure (non-effectful) value that is either a success (`Right`) or a failure (`Left`). While `Effect<T, E, R>` carries the same success/error distinction with added effect tracking (I/O, dependencies, async), `Either` is for pure computations that can fail in isolation:
