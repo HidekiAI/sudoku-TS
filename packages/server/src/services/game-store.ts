@@ -63,9 +63,9 @@ export const makeGameStore = Effect.gen(function* (_) {
     const indices = yield* Effect.all(
       Array.makeBy(12, () => Random.nextIntBetween(0, chars.length)),
     );
-    return indices
-      .map((i) => Option.getOrElse(Option.fromNullable(chars[i]), () => ""))
-      .join("");
+    return Array.filterMap(indices, (i) => Option.fromNullable(chars[i])).join(
+      "",
+    );
   });
 
   const create = (
@@ -106,12 +106,12 @@ export const makeGameStore = Effect.gen(function* (_) {
 
   const update = (id: string, patch: Partial<GameSession>) =>
     Effect.gen(function* (_) {
-      yield* SynchronizedRef.update(store, (map) => {
-        const current = HashMap.get(map, id);
-        if (Option.isNone(current)) return map;
-        const updated: GameSession = { ...current.value, ...patch };
-        return HashMap.set(map, id, updated);
-      });
+      yield* SynchronizedRef.update(store, (map) =>
+        Option.match(HashMap.get(map, id), {
+          onNone: () => map,
+          onSome: (session) => HashMap.set(map, id, { ...session, ...patch }),
+        }),
+      );
     });
 
   // Fix: Atomic read-modify-write using SynchronizedRef.modify.

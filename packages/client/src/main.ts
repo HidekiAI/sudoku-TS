@@ -33,11 +33,11 @@ function handleKey(
           Effect.map(Option.some),
           Effect.catchAll(() => Effect.succeed(Option.none())),
         );
-        if (Option.isSome(result)) {
-          const r = result.value;
-          return setGame(state, r.id, r.difficulty, r.board, r.givenMask);
-        }
-        return setConnecting(state);
+        return Option.match(result, {
+          onSome: (r) =>
+            setGame(state, r.id, r.difficulty, r.board, r.givenMask),
+          onNone: () => setConnecting(state),
+        });
       });
     }
     // Fix: Non-null assertion on dynamic key access bypasses type safety.
@@ -108,15 +108,16 @@ function handleKey(
           Effect.map(Option.some),
           Effect.catchAll(() => Effect.succeed(Option.none())),
         );
-        if (Option.isSome(result)) {
-          const r = result.value;
-          return updateBoard(state, r.board, r.message, r.solved, {
-            row,
-            col,
-            isConflict: false,
-          });
-        }
-        return showMessage(state, "Hint failed. Is the server running?");
+        return Option.match(result, {
+          onSome: (r) =>
+            updateBoard(state, r.board, r.message, r.solved, {
+              row,
+              col,
+              isConflict: false,
+            }),
+          onNone: () =>
+            showMessage(state, "Hint failed. Is the server running?"),
+        });
       });
     }
 
@@ -150,15 +151,11 @@ function tryConnect(
               Effect.map(Option.some),
               Effect.catchAll(() => Effect.succeed(Option.none())),
             );
-            return Option.isSome(result)
-              ? setGame(
-                  state,
-                  result.value.id,
-                  result.value.difficulty,
-                  result.value.board,
-                  result.value.givenMask,
-                )
-              : state;
+            return Option.match(result, {
+              onSome: (r) =>
+                setGame(state, r.id, r.difficulty, r.board, r.givenMask),
+              onNone: () => state,
+            });
           }),
         ),
       ),
