@@ -533,13 +533,42 @@ let evens: Vec<i32> = (1..=5)
 // → vec![20, 40]
 ```
 
-#### Effect-TS — explicit via `Array.filterMap` / `Array.getSomes` / `Option.toArray`
+#### Effect-TS — explicit via `Array.filterMap` / `Array.getSomes` / `Option.match` / `Option.toArray`
 
-Effect-TS's `Option<T>` does **not** implement `Iterable<T>` (no `[Symbol.iterator]`). Instead, the same patterns use explicit combinators from the `Array` and `Option` modules:
+Effect-TS's `Option<T>` does **not** implement `Iterable<T>` (no `[Symbol.iterator]`). Instead, the same patterns use explicit combinators from the `Array` and `Option` modules.
+
+**Real example — ID generation with `Array.filterMap`** (`packages/server/src/services/game-store.ts:61-68`):
 
 ```typescript
-import { Array, Option, pipe } from "effect";
+import { Array, Option, Random, Effect } from "effect";
 
+const generateId: Effect.Effect<string> = Effect.gen(function* (_) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const indices = yield* Effect.all(
+    Array.makeBy(12, () => Random.nextIntBetween(0, chars.length)),
+  );
+  return Array.filterMap(indices, (i) => Option.fromNullable(chars[i])).join("");
+});
+```
+
+`Array.filterMap` maps each index through `Option.fromNullable` — indices outside `chars` bounds produce `None` (dropped), valid indices produce `Some(char)` (collected). The result is directly joined into a string without a `getOrElse("")` fallback. Equivalent to Rust's `indices.iter().filter_map(|i| chars.get(i)).collect::<String>()`.
+
+**Real example — atomic DB update with `Option.match`** (`packages/server/src/services/game-store.ts:107-114`):
+
+```typescript
+yield* SynchronizedRef.update(store, (map) =>
+  Option.match(HashMap.get(map, id), {
+    onNone: () => map,
+    onSome: (session) => HashMap.set(map, id, { ...session, ...patch }),
+  }),
+);
+```
+
+`HashMap.get` returns `Option<GameSession>` — `Option.match` handles both branches inline without a separate `isNone` guard or `.value` access. The `onNone` path returns the map unchanged; `onSome` merges the patch and returns the updated map.
+
+**Building blocks:**
+
+```typescript
 // Option.toArray — Some → [v], None → []  (F# yield! / Rust flatten on single)
 Option.toArray(Option.some(42))   // → [42]
 Option.toArray(Option.none())     // → []
@@ -552,19 +581,14 @@ for (const x of Option.toArray(myOption)) {
 // Array.getSomes — filter out Nones  (Rust flatten, F# choose with identity)
 const options = [Option.some(1), Option.none(), Option.some(3)];
 pipe(options, Array.getSomes)   // → [1, 3]
+```
 
-// Array.filterMap — map + keep Somes in one pass  (Rust filter_map, F# choose)
-// This is the actual equivalent of Rust's filter_map:
-const evens = pipe(
-  [1, 2, 3, 4, 5],
-  Array.filterMap((n) => n % 2 === 0 ? Option.some(n * 10) : Option.none()),
-); // → [20, 40]
+**Real example — `findEmpty` uses `Array.filterMap` with `Array.flatMap`** (`packages/shared/src/engine/solver.ts:54-68`):
 
-// In the solver, findEmpty uses Array.filterMap with flatMap
-// to find the first empty cell (like Rust's flat_map + find):
+```typescript
+// Rust: (0..9).flat_map(|r| (0..9).map(move |c| (r, c)))
+//        .find(|&(r, c)| board[r][c] == 0)
 export function findEmpty(board: Board): Option.Option<[number, number]> {
-  // Rust: (0..9).flat_map(|r| (0..9).map(move |c| (r, c)))
-  //        .find(|&(r, c)| board[r][c] == 0)
   return Array.head(
     Array.filterMap(
       Array.flatMap(
@@ -585,10 +609,11 @@ export function findEmpty(board: Board): Option.Option<[number, number]> {
 #### Summary table
 
 | Pattern | F# | Rust | Effect-TS |
-|---|---|---|---|
+|---|---|---|---|---|
 | Option → 0..1 elements | `yield! someOpt` | `option.flatten()` (single) | `Option.toArray(someOpt)` |
 | Filter-map over iterable | `Seq.choose fn xs` | `xs.iter().filter_map(fn)` | `Array.filterMap(xs, fn)` |
 | Keep only Somes | `Seq.choose id xs` | `xs.iter().flatten()` | `Array.getSomes(xs)` |
+| Pattern match | `match x with \| Some v -> ... \| None -> ...` | `match x { Some(v) => ..., None => ... }` | `Option.match(x, { onSome: v => ..., onNone: () => ... })` |
 | For-loop over option | `for x in someOpt do ...` | `for x in someOpt { ... }` | `for (const x of Option.toArray(someOpt)) { ... }` |
 | Short-circuit on None | `Option.defaultValue` / `match` | `?` operator | `Option.getOrThrow` / `yield*` (in Effect.gen) |
 
