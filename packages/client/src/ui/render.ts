@@ -1,4 +1,4 @@
-import { Array, Effect } from "effect";
+import { Array, Console, Effect } from "effect";
 import chalk from "chalk";
 // Fix: `Board` import was unused — Board is accessed through ClientState.board,
 // whose type flows through the ClientState interface directly.
@@ -147,12 +147,11 @@ function renderGameBoard(state: ClientState): string {
 }
 
 export function render(state: ClientState): Effect.Effect<void> {
-  return Effect.sync(() => {
-    console.clear();
-    if (state.phase === "connecting") {
-      console.log(renderConnectingString());
-    } else {
-      console.log(renderGameBoard(state));
-    }
-  });
+  return Effect.sync(() => console.clear()).pipe(
+    Effect.flatMap(() =>
+      state.phase === "connecting"
+        ? Console.log(renderConnectingString())
+        : Console.log(renderGameBoard(state)),
+    ),
+  );
 }

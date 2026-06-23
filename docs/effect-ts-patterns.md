@@ -948,42 +948,13 @@ Every `??` default (TypeScript) or `unwrap_or(default)` (Rust) is a **deliberate
 
 Search for `// Safety:` comments preceding each `??` or `getOrElse` to find the justification. If a new `??` is added without a `// Safety:` comment, the review will flag it.
 
-## Logging — `Console.log` vs `Effect.log` and Structured Error Reporting
+## Logging — `Effect.log` as the Primary API, `Console.log` for TUI, Raw `console.log` Only at Exit
 
-Logging inside an Effect program is itself an `Effect` — both `Console.log` and the `Effect.log` family return `Effect<void>` (zero error channel, zero requirements), so they compose naturally with any `Effect<A, E, R>` pipeline.
+Logging inside an Effect program is itself an `Effect` — all logging APIs return `Effect<void>` (zero error channel, zero requirements), so they compose naturally with any `Effect<A, E, R>` pipeline.
 
-### `Console.log` / `Console.error` — direct stdout/stderr
+### `Effect.logInfo` / `Effect.logError` — structured, level-aware logging (preferred)
 
-Used throughout `packages/server/src/main.ts` for HTTP request logging and startup messages:
-
-```typescript
-yield* Console.log(`Sudoku server started on http://${host}:${port}`);
-yield* Console.log(`→ ${req.method} ${req.url}`);
-yield* Console.log(`← ${req.method} ${req.url} ${resp.status}`);
-```
-
-`Console.log` is a lightweight, side-effect-only `Effect<void>` — it writes a string to stdout and succeeds. `Console.error` writes to stderr and is used for crash reporting:
-
-```typescript
-// Crashed server — log structured JSON to stderr
-yield* Console.error(
-  JSON.stringify({
-    kind: "crashed",
-    message: `Server error: ${e}`,
-  }),
-);
-```
-
-| API | Target | Returns | Used for |
-|---|---|---|---|
-| `Console.log(...args)` | stdout | `Effect<void>` | General info, request logs |
-| `Console.error(...args)` | stderr | `Effect<void>` | Errors, crash reports |
-
-Because both return `Effect<void>`, they can be inserted anywhere in an `Effect.gen` block with `yield*` or chained with `.pipe()` — no special wrapping needed.
-
-### `Effect.log` / `Effect.logError` — structured, level-aware logging
-
-Effect provides a built-in structured logging API that associates every log entry with the current **fiber id**, **span**, and **log annotations** — all of which are inherited from the calling Effect's context:
+Effect's built-in structured logging API associates every log entry with the current **fiber id**, **span**, and **log annotations** — inherited from the calling Effect's context at no extra cost:
 
 ```typescript
 import { Effect } from "effect";
@@ -991,13 +962,58 @@ import { Effect } from "effect";
 // Five log levels, each returning Effect<void, never, never>:
 Effect.logTrace("entering hot path");
 Effect.logDebug("cache miss for key %s", key);
-Effect.logInfo("game created: %s", gameId);
+Effect.logInfo("game created: %s", gameId);       // default level for Effect.log
 Effect.logWarning("rate limit approaching: %d req/s", rpm);
 Effect.logError("store lookup failed: %s", id);
 Effect.logFatal("unrecoverable: %o", error);
 ```
 
-`Effect.log` (without level suffix) defaults to `INFO`. All variants accept printf-style format strings and spread arguments, just like `console.log`.
+This is the **primary logging API** used throughout the server (`packages/server/src/main.ts`):
+
+```typescript
+// HTTP request traces — Effect.logInfo routes through the Logger system
+yield* Effect.logInfo(`→ ${req.method} ${req.url}`);
+const resp = yield* HttpMiddleware.cors()(app);
+yield* Effect.logInfo(`← ${req.method} ${req.url} ${resp.status}`);
+```
+
+```typescript
+// Crash reporting — Effect.logError writes to the error log level
+Effect.catchAll((e) =>
+  Effect.logError(
+    JSON.stringify({ kind: "crashed", message: `Server error: ${e}` }),
+  ),
+);
+```
+
+All variants accept printf-style format strings and spread arguments, just like `console.log`.
+
+### `Console.log` — TUI rendering (render output, not program logging)
+
+The TUI client renders its game board to the terminal via `packages/client/src/ui/render.ts`. For this, `Console.log` (from effect's `Console` module) is the right choice — it's a simple, level-less write to stdout that wraps `process.stdout.write`:
+
+```typescript
+import { Console, Effect } from "effect";
+
+export function render(state: ClientState): Effect.Effect<void> {
+  return Effect.sync(() => console.clear()).pipe(
+    Effect.flatMap(() =>
+      state.phase === "connecting"
+        ? Console.log(renderConnectingString())   // render output, not a log
+        : Console.log(renderGameBoard(state)),    // render output, not a log
+    ),
+  );
+}
+```
+
+`Console.log` is appropriate here because the output **is the program's UI**, not a diagnostic log. Using `Effect.logInfo` would tag it with levels and fiber metadata that are meaningless for display output.
+
+| API | Target | Returns | Used for |
+|---|---|---|---|
+| `Effect.logInfo(...)` | configured logger (default stdout) | `Effect<void, never, never>` | Diagnostic logging with level/fiber context |
+| `Effect.logError(...)` | configured logger (default stderr) | `Effect<void, never, never>` | Error logging with level/fiber context |
+| `Console.log(...)` | stdout | `Effect<void>` | TUI render output, display strings |
+| `Console.error(...)` | stderr | `Effect<void>` | TUI error display |
 
 ### Logging errors in `Effect<A, E, R>` pipelines
 
@@ -1026,9 +1042,9 @@ yield* store.get(id).pipe(
 | `Effect.catchAll(f)` | Replaces error with success | — | Recover from errors |
 | `Effect.tapErrorLog(message)` | Preserves error | Passes through unchanged | Shorthand for `tapError` + `logError` |
 
-### Structured result logging at program exit
+### Structured result logging at program exit — raw `console.log` is acceptable
 
-Both `Console.log` and `Effect.logInfo` work at the top-level boundary to produce structured output. In this project, the client's `main.ts` converts the final game state into a `RunResult` JSON blob and prints it:
+At the program boundary — after `Effect.runPromise` resolves — we're outside Effect land. The `.then()` and `.catch()` callbacks run in plain Promise context, so raw `console.log`/`console.error` is the pragmatic choice:
 
 ```typescript
 type RunResult = {
@@ -1042,34 +1058,36 @@ type RunResult = {
 
 Effect.runPromise(/* ... */).then((state) => {
   const result: RunResult = { kind: "quit", message: state.message, /* ... */ };
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result, null, 2));   // program output, not Effect
+}, (error) => {
+  console.error(JSON.stringify({ kind: "crashed", message: `${error}` }));
+  process.exit(1);
 });
 ```
 
-The server does the same on graceful shutdown:
+The server's graceful shutdown is still inside Effect, so it uses `Effect.logInfo`:
 
 ```typescript
-const result: RunResult = {
-  kind: "shutdown",
-  message: "Server shut down gracefully",
-  port,
-  host,
-};
-yield* Console.log(JSON.stringify(result));
+yield* Effect.logInfo(
+  JSON.stringify({
+    kind: "shutdown",
+    message: "Server shut down gracefully",
+    port,
+    host,
+  }),
+);
 ```
 
-Both produce structured JSON at the top level — machine-parseable and human-readable, suitable for log aggregators or container orchestration systems.
+Both produce structured JSON at the top level — machine-parseable and suitable for log aggregators or container orchestration.
 
-### When to use `Console.*` vs `Effect.log`
+### When to use which
 
-| Use `Console.log` / `Console.error` | Use `Effect.log` / `Effect.logError` |
-|---|---|
-| Ad-hoc logging, request traces, startup messages | Production logging where level routing matters |
-| When you need stdout/stderr separation | When you need fiber-span correlation |
-| Simple scripts, TUI programs | Server applications with log aggregation |
-| Quick debugging output | When log level filtering is required (e.g., suppress DEBUG in prod) |
-
-Both APIs coexist peacefully — `Console.log` is a thin wrapper around `process.stdout.write`, while `Effect.log` routes through Effect's `Logger` system (configurable via `Logger.replace`).
+| API | Use case | Inside Effect? |
+|---|---|---|
+| `Effect.logInfo` / `Effect.logError` | Diagnostic logging — request traces, errors, startup messages | ✅ Yes — preferred for all Effect code |
+| `Effect.tapError` + `Effect.logError` | Log an error and re-raise it (inspect without swallowing) | ✅ Yes |
+| `Console.log` / `Console.error` | TUI display output, render strings to terminal | ✅ Yes — for output, not logging |
+| `console.log` / `console.error` (raw) | Program exit boundary (`.then()` / `.catch()`) | ❌ No — outside Effect land |
 
 effect-ts is not a wholesale replacement for JavaScript — it targets specific pain points (type-safe errors, DI, concurrency, lazy evaluation). For simple pure expressions, native JS is often terser. **Using native JS for what it's good at is a strength, not a compromise.**
 

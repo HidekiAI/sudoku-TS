@@ -1,4 +1,4 @@
-import { Effect, Console, Config, Option, Fiber } from "effect";
+import { Effect, Config, Option, Fiber } from "effect";
 import { HttpMiddleware, HttpServerRequest } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { createServer } from "node:http";
@@ -27,9 +27,9 @@ const applyCliArgs: Effect.Effect<void> = Effect.gen(function* (_) {
 const corsWithLogging = HttpMiddleware.make((app) =>
   Effect.gen(function* (_) {
     const req = yield* HttpServerRequest.HttpServerRequest;
-    yield* Console.log(`→ ${req.method} ${req.url}`);
+    yield* Effect.logInfo(`→ ${req.method} ${req.url}`);
     const resp = yield* HttpMiddleware.cors()(app);
-    yield* Console.log(`← ${req.method} ${req.url} ${resp.status}`);
+    yield* Effect.logInfo(`← ${req.method} ${req.url} ${resp.status}`);
     return resp;
   }),
 );
@@ -55,7 +55,7 @@ const program = Effect.gen(function* (_) {
       Effect.provideService(GameService, svc),
       Effect.fork,
     );
-  yield* Console.log(`Sudoku server started on http://${host}:${port}`);
+  yield* Effect.logInfo(`Sudoku server started on http://${host}:${port}`);
 
   yield* Effect.async<void>((resume) => {
     const onSignal = () => {
@@ -75,13 +75,13 @@ const program = Effect.gen(function* (_) {
     port,
     host,
   };
-  yield* Console.log(JSON.stringify(result));
+  yield* Effect.logInfo(JSON.stringify(result));
 });
 
 NodeRuntime.runMain(
   Effect.scoped(program).pipe(
     Effect.catchAll((e) =>
-      Console.error(
+      Effect.logError(
         JSON.stringify({
           kind: "crashed",
           message: `Server error: ${e}`,
