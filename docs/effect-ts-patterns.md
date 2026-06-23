@@ -609,7 +609,7 @@ export function findEmpty(board: Board): Option.Option<[number, number]> {
 #### Summary table
 
 | Pattern | F# | Rust | Effect-TS |
-|---|---|---|---|---|
+|---|---|---|---|
 | Option → 0..1 elements | `yield! someOpt` | `option.flatten()` (single) | `Option.toArray(someOpt)` |
 | Filter-map over iterable | `Seq.choose fn xs` | `xs.iter().filter_map(fn)` | `Array.filterMap(xs, fn)` |
 | Keep only Somes | `Seq.choose id xs` | `xs.iter().flatten()` | `Array.getSomes(xs)` |
@@ -948,7 +948,128 @@ Every `??` default (TypeScript) or `unwrap_or(default)` (Rust) is a **deliberate
 
 Search for `// Safety:` comments preceding each `??` or `getOrElse` to find the justification. If a new `??` is added without a `// Safety:` comment, the review will flag it.
 
-## When Native JS Is More Elegant Than effect-ts
+## Logging — `Console.log` vs `Effect.log` and Structured Error Reporting
+
+Logging inside an Effect program is itself an `Effect` — both `Console.log` and the `Effect.log` family return `Effect<void>` (zero error channel, zero requirements), so they compose naturally with any `Effect<A, E, R>` pipeline.
+
+### `Console.log` / `Console.error` — direct stdout/stderr
+
+Used throughout `packages/server/src/main.ts` for HTTP request logging and startup messages:
+
+```typescript
+yield* Console.log(`Sudoku server started on http://${host}:${port}`);
+yield* Console.log(`→ ${req.method} ${req.url}`);
+yield* Console.log(`← ${req.method} ${req.url} ${resp.status}`);
+```
+
+`Console.log` is a lightweight, side-effect-only `Effect<void>` — it writes a string to stdout and succeeds. `Console.error` writes to stderr and is used for crash reporting:
+
+```typescript
+// Crashed server — log structured JSON to stderr
+yield* Console.error(
+  JSON.stringify({
+    kind: "crashed",
+    message: `Server error: ${e}`,
+  }),
+);
+```
+
+| API | Target | Returns | Used for |
+|---|---|---|---|
+| `Console.log(...args)` | stdout | `Effect<void>` | General info, request logs |
+| `Console.error(...args)` | stderr | `Effect<void>` | Errors, crash reports |
+
+Because both return `Effect<void>`, they can be inserted anywhere in an `Effect.gen` block with `yield*` or chained with `.pipe()` — no special wrapping needed.
+
+### `Effect.log` / `Effect.logError` — structured, level-aware logging
+
+Effect provides a built-in structured logging API that associates every log entry with the current **fiber id**, **span**, and **log annotations** — all of which are inherited from the calling Effect's context:
+
+```typescript
+import { Effect } from "effect";
+
+// Five log levels, each returning Effect<void, never, never>:
+Effect.logTrace("entering hot path");
+Effect.logDebug("cache miss for key %s", key);
+Effect.logInfo("game created: %s", gameId);
+Effect.logWarning("rate limit approaching: %d req/s", rpm);
+Effect.logError("store lookup failed: %s", id);
+Effect.logFatal("unrecoverable: %o", error);
+```
+
+`Effect.log` (without level suffix) defaults to `INFO`. All variants accept printf-style format strings and spread arguments, just like `console.log`.
+
+### Logging errors in `Effect<A, E, R>` pipelines
+
+The most common pattern for logging errors without swallowing them is `Effect.tapError` — it peeks at the error channel, logs it, and re-raises the same error:
+
+```typescript
+// Unlike catchAll, tapError does NOT recover — it inspects and re-fails
+yield* store.get(id).pipe(
+  Effect.tapError((e) => Effect.logError("store.get failed: %s", e.message)),
+  // error still propagates to caller — nothing swallowed
+);
+```
+
+If you want to log **and** recover (provide a fallback), chain `catchAll` separately:
+
+```typescript
+yield* store.get(id).pipe(
+  Effect.tapError((e) => Effect.logError("store.get failed: %s", e.message)),
+  Effect.catchAll(() => Effect.succeed(defaultSession)),
+);
+```
+
+| API | Effect on error channel | Effect on success channel | Use case |
+|---|---|---|---|
+| `Effect.tapError(f)` | Preserves error (re-raises) | Passes through unchanged | Log errors without swallowing |
+| `Effect.catchAll(f)` | Replaces error with success | — | Recover from errors |
+| `Effect.tapErrorLog(message)` | Preserves error | Passes through unchanged | Shorthand for `tapError` + `logError` |
+
+### Structured result logging at program exit
+
+Both `Console.log` and `Effect.logInfo` work at the top-level boundary to produce structured output. In this project, the client's `main.ts` converts the final game state into a `RunResult` JSON blob and prints it:
+
+```typescript
+type RunResult = {
+  readonly kind: "quit" | "completed" | "crashed";
+  readonly message: string;
+  readonly movesCount: number;
+  readonly hintsUsed: number;
+  readonly elapsedSeconds: number;
+  readonly difficulty: string;
+};
+
+Effect.runPromise(/* ... */).then((state) => {
+  const result: RunResult = { kind: "quit", message: state.message, /* ... */ };
+  console.log(JSON.stringify(result, null, 2));
+});
+```
+
+The server does the same on graceful shutdown:
+
+```typescript
+const result: RunResult = {
+  kind: "shutdown",
+  message: "Server shut down gracefully",
+  port,
+  host,
+};
+yield* Console.log(JSON.stringify(result));
+```
+
+Both produce structured JSON at the top level — machine-parseable and human-readable, suitable for log aggregators or container orchestration systems.
+
+### When to use `Console.*` vs `Effect.log`
+
+| Use `Console.log` / `Console.error` | Use `Effect.log` / `Effect.logError` |
+|---|---|
+| Ad-hoc logging, request traces, startup messages | Production logging where level routing matters |
+| When you need stdout/stderr separation | When you need fiber-span correlation |
+| Simple scripts, TUI programs | Server applications with log aggregation |
+| Quick debugging output | When log level filtering is required (e.g., suppress DEBUG in prod) |
+
+Both APIs coexist peacefully — `Console.log` is a thin wrapper around `process.stdout.write`, while `Effect.log` routes through Effect's `Logger` system (configurable via `Logger.replace`).
 
 effect-ts is not a wholesale replacement for JavaScript — it targets specific pain points (type-safe errors, DI, concurrency, lazy evaluation). For simple pure expressions, native JS is often terser. **Using native JS for what it's good at is a strength, not a compromise.**
 
