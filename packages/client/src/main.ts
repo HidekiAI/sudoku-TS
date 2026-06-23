@@ -191,14 +191,57 @@ function gameLoop(
 
 const ClientLive = Layer.provide(GameApiLive, FetchHttpClient.layer);
 
+type RunResult = {
+  readonly kind: "quit" | "completed" | "crashed";
+  readonly message: string;
+  readonly movesCount: number;
+  readonly hintsUsed: number;
+  readonly elapsedSeconds: number;
+  readonly difficulty: string;
+};
+
+function toRunResult(state: ClientState): RunResult {
+  return {
+    kind: state.phase === "completed" ? "completed" : "quit",
+    message: state.message,
+    movesCount: state.movesCount,
+    hintsUsed: state.hintsUsed,
+    elapsedSeconds: state.elapsedSeconds,
+    difficulty: state.difficulty,
+  };
+}
+
 Effect.runPromise(
   makeReadKey().pipe(
     Effect.flatMap(({ readKey, restoreStdin }) =>
       gameLoop(initialState, readKey).pipe(
         Effect.provide(ClientLive),
         Effect.ensuring(restoreStdin),
-        Effect.catchAll((e) => Console.error(`Fatal error: ${e}`)),
+        Effect.catchAll((e) =>
+          Effect.succeed({
+            ...initialState,
+            phase: "quit" as const,
+            message: `Fatal error: ${e}`,
+          }),
+        ),
       ),
     ),
   ),
+).then(
+  (state) => {
+    const result = toRunResult(state);
+    console.log(JSON.stringify(result, null, 2));
+  },
+  (error: unknown) => {
+    const result: RunResult = {
+      kind: "crashed",
+      message: `Unhandled error: ${error}`,
+      movesCount: 0,
+      hintsUsed: 0,
+      elapsedSeconds: 0,
+      difficulty: "easy",
+    };
+    console.error(JSON.stringify(result, null, 2));
+    process.exit(1);
+  },
 );

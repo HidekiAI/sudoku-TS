@@ -490,6 +490,108 @@ export function solve(board: Board): Option.Option<Board> {
 }
 ```
 
+## Either — Typed Success-or-Failure (`packages/shared/src/schemas/response.test.ts`)
+
+`Either<L, R>` is the direct analogue of Rust's `Result<T, E>` — a pure (non-effectful) value that is either a success (`Right`) or a failure (`Left`). While `Effect<T, E, R>` carries the same success/error distinction with added effect tracking (I/O, dependencies, async), `Either` is for pure computations that can fail in isolation:
+
+| Concept | Rust `Result` | effect-ts `Either` | effect-ts `Effect` |
+|---|---|---|---|
+| Success value | `Ok(T)` | `Either.right(v)` / `Right<R>` | Success channel `T` |
+| Error value | `Err(E)` | `Either.left(e)` / `Left<L>` | Error channel `E` |
+| Pure fallible | `Result<T, E>` | `Either<L, R>` | — |
+| Effectful fallible | `async fn → Result<T, E>` | — | `Effect<T, E, R>` |
+| Inspection | `match` | `Either.match({ onLeft, onRight })` | `Effect.match({ onSuccess, onFailure })` |
+| Map success | `.map()` | `.pipe(Either.map(f))` | `.pipe(Effect.map(f))` |
+| Chain | `.and_then()` | `.pipe(Either.flatMap(f))` | `yield*` / `.pipe(Effect.flatMap(f))` |
+| Map error | `.map_err()` | `.pipe(Either.mapLeft(f))` | `.pipe(Effect.mapError(f))` |
+| From optional | `.ok_or(err)` | `Either.fromOption(() => err)(opt)` | `Effect.fromOption(() => err)(opt)` |
+| Unwrap | `.unwrap()` / `?` | `Either.getOrThrow` | `Effect.runSync` / `yield*` |
+
+### When to use `Either` vs `Effect`
+
+| Use `Either<L, R>` | Use `Effect<T, E, R>` |
+|---|---|
+| Pure function that can fail (no I/O) | Any operation with I/O, async, or dependency requirements |
+| Validation / parsing without side effects | Schema decoding at a service boundary (needs DI context) |
+| Business logic returning success/failure | Operations needing retry, timeout, concurrent state |
+| Intermediate data transformation with error paths | Operations composing multiple fallible steps that share deps |
+
+### Rust-equivalent pattern matching
+
+```typescript
+import { Either, pipe } from "effect";
+
+// Rust: match result { Ok(v) => ..., Err(e) => ... }
+const message = Either.match(result, {
+  onLeft: (e) => `Error: ${e}`,
+  onRight: (v) => `Success: ${v}`,
+});
+
+// Rust: result.map(|v| v * 2)
+const doubled = pipe(result, Either.map((v) => v * 2));
+
+// Rust: result.and_then(|v| Ok(v + 1))
+const chained = pipe(result, Either.flatMap((v) => Either.right(v + 1)));
+
+// Rust: result.map_err(|e| format!("wrapped: {e}"))
+const wrapped = pipe(result, Either.mapLeft((e) => `wrapped: ${e}`));
+
+// Rust: result.ok_or(Error::new("missing"))
+const fromOpt: Either<string, number> = pipe(
+  Option.some(42),
+  Either.fromOption(() => "missing"),
+);
+// → Either.right(42)
+
+// Rust: if let Ok(v) = result { ... }
+if (Either.isRight(result)) {
+  const valid: R = result.right; // typed access to the success
+} else {
+  const error: L = result.left;  // typed access to the failure
+}
+```
+
+### `Schema.decodeUnknownEither` — pure validation at test boundaries
+
+The project uses `Schema.decodeUnknownEither` in tests to validate schemas without entering the Effect runtime:
+
+```typescript
+// Instead of Schema.decodeUnknown(...) which returns Effect,
+// decodeUnknownEither returns Either<ParseError, T> directly:
+const result = Schema.decodeUnknownEither(ResponseSchema)(raw);
+
+if (Either.isRight(result)) {
+  // result.right: typed response
+} else {
+  // result.left: ParseError with path + message
+}
+```
+
+This is the functional equivalent of Rust's `serde_json::from_str::<T>(input)` — it returns a `Result<T, Error>` in one pure call, with no I/O or async context required.
+
+### Error channel vs. Either — when to use which
+
+The same intuition applies as choosing between Rust's `Result<T, E>` and `panic!`:
+
+- **Use the error channel (`E` in `Effect<T, E, R>`)** for errors that the caller is expected to handle — network failures, validation errors, missing resources. These are the `Err` / `Left` of the Effect world.
+- **Use defects / `Cause.die`** for programming errors that should never happen — index-out-of-bounds, assertion failures, unreachable branches. These are the `panic!` / `unreachable!()` equivalents.
+- **Use `Either` inside a pure function** when the computation has no I/O but can still fail — like parsing a single value or transforming data with possible malformed input.
+
+### Relationship: `Either` as a snapshot of `Effect`
+
+An `Effect<T, E, R>` that has been run (via `Effect.runSync` or `Effect.runPromise`) produces either a success value `T` or — if captured via `Effect.either` — an `Either<E, T>`:
+
+```typescript
+// Capture both success and failure as a pure value
+const captured: Effect<Either<E, T>, never, R> = Effect.either(myEffect);
+
+// Run it — the outer Effect never fails; the Either captures the inner error
+const either = yield* Effect.either(myEffect);
+// either: Either<E, T> — same as Rust's Result<T, E>
+```
+
+`Effect.either` is the analogue of pattern-matching on a Rust `Result` to transform the error into the success channel — after `.either`, the Effect's error channel is `never` and errors are embedded in the `Either` value.
+
 ## Effect.catchTag / Effect.catchAll (`packages/server/src/routes/`)
 
 Structured error handling — instead of `try/catch` with its untyped `Error` objects, effect-ts lets you catch specific error types by tag. `Effect.catchTag("ParseError")` catches only `Schema` parse errors, while `Effect.catchAll` is the final fallback.

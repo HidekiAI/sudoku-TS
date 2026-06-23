@@ -1,4 +1,4 @@
-import { Effect, Console, Config, Option } from "effect";
+import { Effect, Console, Config, Option, Fiber } from "effect";
 import { HttpMiddleware, HttpServerRequest } from "@effect/platform";
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { createServer } from "node:http";
@@ -34,6 +34,13 @@ const corsWithLogging = HttpMiddleware.make((app) =>
   }),
 );
 
+type RunResult = {
+  readonly kind: "shutdown" | "crashed";
+  readonly message: string;
+  readonly port: number;
+  readonly host: string;
+};
+
 const program = Effect.gen(function* (_) {
   yield* applyCliArgs;
   const port = yield* Config.number("PORT").pipe(Config.withDefault(8000));
@@ -41,7 +48,7 @@ const program = Effect.gen(function* (_) {
   const store = yield* makeGameStore;
   const svc = yield* Effect.provideService(makeGameService, GameStore, store);
   const nodeServer = yield* NodeHttpServer.make(createServer, { port, host });
-  yield* nodeServer
+  const fiber = yield* nodeServer
     .serve(router, corsWithLogging)
     .pipe(
       Effect.provideService(GameStore, store),
@@ -49,11 +56,37 @@ const program = Effect.gen(function* (_) {
       Effect.fork,
     );
   yield* Console.log(`Sudoku server started on http://${host}:${port}`);
-  yield* Effect.never;
+
+  yield* Effect.async<void>((resume) => {
+    const onSignal = () => {
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+      resume(Effect.void);
+    };
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+  });
+
+  yield* Fiber.interrupt(fiber);
+
+  const result: RunResult = {
+    kind: "shutdown",
+    message: "Server shut down gracefully",
+    port,
+    host,
+  };
+  yield* Console.log(JSON.stringify(result));
 });
 
 NodeRuntime.runMain(
   Effect.scoped(program).pipe(
-    Effect.catchAll((e) => Console.error(`Server error: ${e}`)),
+    Effect.catchAll((e) =>
+      Console.error(
+        JSON.stringify({
+          kind: "crashed",
+          message: `Server error: ${e}`,
+        } satisfies Omit<RunResult, "port" | "host">),
+      ),
+    ),
   ),
 );
